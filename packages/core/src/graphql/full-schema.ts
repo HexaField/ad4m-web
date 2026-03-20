@@ -1,6 +1,7 @@
 import {
   createSchema,
   AgentStatusType,
+  AgentType,
   PerspectiveHandleType,
   LinkExpressionType,
   LinkExpressionUpdatedType,
@@ -90,6 +91,11 @@ export function createFullSchema(
       runtimeMessageReceived: {
         type: new GraphQLNonNull(PerspectiveExpressionType),
         subscribe: () => createAsyncIterator(pubsub, 'runtimeMessageReceived'),
+        resolve: (event: any) => event
+      },
+      agentUpdated: {
+        type: new GraphQLNonNull(AgentType),
+        subscribe: () => createAsyncIterator(pubsub, 'agentUpdated'),
         resolve: (event: any) => event
       }
     }

@@ -127,5 +127,14 @@ export const OPERATION_CAPABILITIES: Record<string, { domain: ResourceDomain; ac
   perspectiveSyncStateChange: { domain: 'perspective', action: 'READ' },
   neighbourhoodSignal: { domain: 'neighbourhood', action: 'READ' },
   exceptionOccurred: { domain: 'runtime', action: 'READ' },
-  runtimeMessageReceived: { domain: 'runtime', action: 'READ' }
+  runtimeMessageReceived: { domain: 'runtime', action: 'READ' },
+  language: { domain: 'language', action: 'READ' },
+  languageMeta: { domain: 'language', action: 'READ' },
+  languages: { domain: 'language', action: 'READ' },
+  languageSource: { domain: 'language', action: 'READ' },
+  runtimeFriendSendMessage: { domain: 'runtime', action: 'CREATE' },
+  languagePublish: { domain: 'language', action: 'CREATE' },
+  languageRemove: { domain: 'language', action: 'DELETE' },
+  languageWriteSettings: { domain: 'language', action: 'UPDATE' },
+  agentUpdated: { domain: 'agent', action: 'READ' }
 }

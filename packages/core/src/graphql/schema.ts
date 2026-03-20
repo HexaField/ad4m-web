@@ -14,6 +14,9 @@ import type { Executor } from '../bootstrap/executor'
 import type { Link } from '../agent/types'
 import type { LinkExpression } from '../linkstore/types'
 import type { CapabilityService } from './capability-service'
+import { createLanguageQueryFields, createLanguageMutationFields } from './language-schema'
+import type { LanguageSchemaContext } from './language-schema'
+import { LanguagePublisher } from '../language/publication'
 
 // === Enums ===
 
@@ -362,6 +365,12 @@ export {
 }
 
 export function createSchema(executor: Executor, capabilityService?: CapabilityService): GraphQLSchema {
+  const languageCtx: LanguageSchemaContext = {
+    languageManager: executor.languageManager,
+    publisher: new LanguagePublisher(),
+    agentDid: executor.agentService.getStatus().did ?? undefined
+  }
+
   const queryType = new GraphQLObjectType({
     name: 'Query',
     fields: {
@@ -491,7 +500,16 @@ export function createSchema(executor: Executor, capabilityService?: CapabilityS
       getTrustedAgents: {
         type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))),
         resolve: () => executor.runtimeService?.getTrustedAgents() ?? []
-      }
+      },
+      runtimeFriendSendMessage: {
+        type: new GraphQLNonNull(GraphQLBoolean),
+        args: {
+          did: { type: new GraphQLNonNull(GraphQLString) },
+          message: { type: new GraphQLNonNull(PerspectiveInputType) }
+        },
+        resolve: (_: unknown, _a: { did: string; message: any }) => false
+      },
+      ...createLanguageQueryFields(languageCtx)
     }
   })
 
@@ -846,7 +864,8 @@ export function createSchema(executor: Executor, capabilityService?: CapabilityS
           if (!executor.runtimeService) throw new Error('RuntimeService not available')
           return executor.runtimeService.setUserFreeAccess(a.userDid, a.freeAccess)
         }
-      }
+      },
+      ...createLanguageMutationFields(languageCtx)
     }
   })
 
