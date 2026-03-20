@@ -76,26 +76,16 @@ pnpm test         # 392 tests (361 core + 30 client + 1 server)
 
 ## Placeholder Implementations
 
-These resolve without error in the GraphQL schema but return defaults or no-op. Full transparency on what isn't wired to real backends yet:
+These resolve without error in the GraphQL schema but return defaults rather than real data:
 
-| Operation | Behaviour | What's Needed |
-| --- | --- | --- |
-| `runtimeHostingUserInfo` | Returns `{ credits: 0, freeAccess: false }` | Hosting backend integration |
-| `runtimeSetHotWalletAddress` | Stores in memory, returns `true` | Wallet/payment system |
-| `runtimeRequestPayment` | Returns `{ success: false }` | Payment provider integration |
-| `runtimeSetUserCredits` | Returns `true`, no-op | Hosting backend |
-| `runtimeSetUserFreeAccess` | Returns `true`, no-op | Hosting backend |
-| `runtimeHcAgentInfos` | Returns `"[]"` | Live Holochain conductor wiring |
-| `runtimeGetNetworkMetrics` | Returns `{ peers: 0, connections: 0 }` | Live Holochain conductor wiring |
-| `runtimeFriendSendMessage` | Returns `false` | DM language wired to routing |
-| `runtimeFriendStatus` | Returns `null` | Friend status tracking via DM language |
-| `perspectiveQuerySurreal` | Returns `{ results: [] }` — NOT proxied to SurrealDB | SurrealDB integration or remove from schema |
-| `languagePublish` | Stores in local in-memory registry only | Language Language for network publication |
-| `agentEntanglementProofPreFlight` | Generates proof structure, no real cross-system binding | External system binding protocol |
-| `agentSignMessage` | Returns `{ signature: '', publicKey: '' }` | Wire to agent crypto signing |
-| `agentPermitCapability` | Returns empty string | Wire to capability grant flow |
-| `runtimeTlsDomain` | Returns `null` | TLS domain configuration |
-| `runtimeReadiness` | Returns all-`true` | Real readiness probing of subsystems |
+- **Hosting & payments** — user info, credits, hot wallet, payment requests (needs hosting backend)
+- **Holochain runtime info** — agent infos, network metrics (needs live conductor wiring)
+- **Direct messaging** — friend send/status, message routing (needs DM language integration)
+- **Language publication** — local in-memory only (needs Language Language for network distribution)
+- **Entanglement proofs** — structure generated but no real cross-system binding
+- **Agent signing** — `agentSignMessage`, `agentPermitCapability` (needs wiring to agent crypto)
+- **SurrealDB queries** — `perspectiveQuerySurreal` returns empty (Oxigraph/SPARQL is the real query engine)
+- **Runtime probes** — TLS domain returns null, readiness returns all-true
 
 ## Differences from Reference Implementation
 
