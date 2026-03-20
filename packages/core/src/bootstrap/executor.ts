@@ -7,6 +7,9 @@ import type { PerspectiveManager } from '../perspective/manager'
 import type { NeighbourhoodManager } from '../neighbourhood/manager'
 
 import type { PubSub } from '../graphql/subscriptions'
+import type { EntanglementService } from '../agent/entanglement'
+import type { FriendService } from '../agent/friends'
+import type { RuntimeService } from '../runtime/service'
 
 export interface ExecutorDeps {
   agentService: AgentServiceInterface
@@ -18,6 +21,9 @@ export interface ExecutorDeps {
   bootstrapConfig: BootstrapConfig
   neighbourhoodManager?: NeighbourhoodManager
   pubsub?: PubSub
+  entanglementService?: EntanglementService
+  friendService?: FriendService
+  runtimeService?: RuntimeService
 }
 
 export class Executor implements ExecutorInterface {
@@ -30,6 +36,9 @@ export class Executor implements ExecutorInterface {
   readonly bootstrapConfig: BootstrapConfig
   readonly neighbourhoodManager?: NeighbourhoodManager
   readonly pubsub?: PubSub
+  readonly entanglementService?: EntanglementService
+  readonly friendService?: FriendService
+  readonly runtimeService?: RuntimeService
   private _isReady = false
 
   constructor(deps: ExecutorDeps) {
@@ -42,6 +51,9 @@ export class Executor implements ExecutorInterface {
     this.bootstrapConfig = deps.bootstrapConfig
     this.neighbourhoodManager = deps.neighbourhoodManager
     this.pubsub = deps.pubsub
+    this.entanglementService = deps.entanglementService
+    this.friendService = deps.friendService
+    this.runtimeService = deps.runtimeService
   }
 
   get isReady(): boolean {

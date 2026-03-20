@@ -3,10 +3,13 @@ import { bytesToHex } from '@noble/hashes/utils.js'
 import type { ContentStore } from '../bootstrap/types'
 import type { LanguageContext, LanguageHandle, LanguageHost, LanguageMeta } from './types'
 import type { BundleResolver, BundleExecutor } from './bundle'
+import type { LanguageHandleInfo } from './registry-types'
 
 export class LanguageManager {
   private host: LanguageHost
   private metadata = new Map<string, LanguageMeta>()
+  private settings = new Map<string, string>()
+  private sources = new Map<string, string>()
   private bundleResolver?: BundleResolver
   private bundleExecutor?: BundleExecutor
   private languageContext?: LanguageContext
@@ -49,6 +52,9 @@ export class LanguageManager {
       throw new Error(`No bundle source available for language "${address}"`)
     }
 
+    // Store the source for later retrieval
+    this.sources.set(address, source)
+
     // If we have a bundle executor, use it to create the Language, then load via host
     if (this.bundleExecutor) {
       const language = await this.bundleExecutor.execute(source, ctx)
@@ -71,12 +77,50 @@ export class LanguageManager {
     return this.metadata.get(address)
   }
 
+  getLanguageSource(address: string): string {
+    const source = this.sources.get(address)
+    if (!source) {
+      throw new Error(`Source not found for language "${address}"`)
+    }
+    return source
+  }
+
+  listLanguages(filter?: string): LanguageHandleInfo[] {
+    const allHandles = this.host.getAllLoaded()
+    return allHandles
+      .filter((h) => !filter || h.name.toLowerCase().includes(filter.toLowerCase()))
+      .map((h) => this.toHandleInfo(h))
+  }
+
+  removeLanguage(address: string): boolean {
+    const handle = this.host.getLoaded(address)
+    if (!handle) return false
+    void this.host.unload(handle)
+    this.metadata.delete(address)
+    this.sources.delete(address)
+    this.settings.delete(address)
+    return true
+  }
+
+  writeSettings(address: string, settingsJson: string): boolean {
+    const handle = this.host.getLoaded(address)
+    if (!handle) return false
+    this.settings.set(address, settingsJson)
+    return true
+  }
+
+  getSettings(address: string): string {
+    return this.settings.get(address) ?? '{}'
+  }
+
   async uninstall(address: string): Promise<void> {
     const handle = this.host.getLoaded(address)
     if (handle) {
       await this.host.unload(handle)
     }
     this.metadata.delete(address)
+    this.sources.delete(address)
+    this.settings.delete(address)
   }
 
   getAllInstalled(): LanguageMeta[] {
@@ -121,6 +165,19 @@ export class LanguageManager {
     }
 
     this.metadata.set(hash, meta)
+    this.sources.set(hash, result)
     return { address: hash, meta }
+  }
+
+  private toHandleInfo(handle: LanguageHandle): LanguageHandleInfo {
+    const lang = handle.language
+    return {
+      address: handle.address,
+      name: handle.name,
+      settings: this.settings.get(handle.address),
+      icon: lang.expressionUI ? { code: lang.expressionUI.icon() } : undefined,
+      constructorIcon: lang.expressionUI ? { code: lang.expressionUI.constructorIcon() } : undefined,
+      settingsIcon: lang.settingsUI ? { code: lang.settingsUI.settingsIcon() } : undefined
+    }
   }
 }

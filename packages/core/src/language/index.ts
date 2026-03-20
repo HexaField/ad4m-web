@@ -1,4 +1,5 @@
 export * from './types'
+export * from './registry-types'
 export { InProcessLanguageHost } from './host'
 export { LanguageManager } from './manager'
 export * from './bundle'
@@ -12,3 +13,6 @@ export {
   DNA_ROLE,
   ZOME_NAME
 } from './p-diff-sync'
+export { getExpression, createExpression, resolveExpressionFromUrl } from './expression-adapter'
+export { applyTemplate, hashBundle, createTemplatedLanguageMeta } from './templating'
+export { LanguagePublisher } from './publication'

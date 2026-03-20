@@ -13,10 +13,8 @@ import { readFileSync } from 'node:fs'
 import { AdminWebsocket, AppWebsocket } from '@holochain/client'
 
 const CONDUCTOR_URL = new URL('ws://localhost:4322')
-const NETWORK_SEED = 'interop-test-1773997164'
-const HAPP_PATH =
-  process.env.HAPP_PATH ||
-  `${process.env.HOME}/Desktop/ad4m/bootstrap-languages/p-diff-sync/hc-dna/workdir/Perspective-Diff-Sync.happ`
+const NETWORK_SEED = 'interop-test-1773997172'
+const HAPP_PATH = process.env.HAPP_PATH || `${import.meta.dirname}/reference-pdiffsync.happ`
 const REFERENCE_GRAPHQL = 'http://192.168.1.2:12000/graphql'
 const REFERENCE_PERSPECTIVE = 'cc56503c-3d78-42c5-bff4-3dd9db334cba'
 const REFERENCE_DID = 'did:key:z6MkoSpk2fgnWgaMj7A1bcNz7aHXnpFFNt2SUbse12PHSFWx'
@@ -55,8 +53,7 @@ async function main() {
   const appInfo = await adminWs.installApp({
     source: { type: 'path', value: HAPP_PATH },
     agent_key: agentKey,
-    installed_app_id: appId,
-    network_seed: NETWORK_SEED
+    installed_app_id: appId
   })
   console.log(`  App installed: ${appInfo.installed_app_id}`)
 
@@ -107,7 +104,7 @@ async function main() {
     })
   }
 
-  // Step 1: create_did_pub_key_link
+  // Step 1: create_did_pub_key_link + add_active_agent_link
   const myDid = 'did:key:z6MkAdamWebTestAgent1234567890abcdef'
   console.log(`\n--- Step 1: create_did_pub_key_link for ${myDid} ---`)
   try {
@@ -117,7 +114,7 @@ async function main() {
     console.log('  ❌ Error:', e.message?.slice(0, 200))
   }
 
-  // Step 2: sync
+  // Step 2: sync (and repeat to broadcast our revision to peers)
   console.log('\n--- Step 2: sync ---')
   try {
     const syncRes = await callZome('sync', myDid)
@@ -143,9 +140,25 @@ async function main() {
     console.log('  ❌ Error:', e.message?.slice(0, 200))
   }
 
-  // Wait for DHT
-  console.log('\nWaiting 10s for DHT propagation...')
-  await new Promise((r) => setTimeout(r, 10000))
+  // Wait for DHT gossip (active_agent links need time to propagate)
+  console.log('\nWaiting 60s for DHT propagation (syncing every 5s)...')
+  for (let i = 0; i < 12; i++) {
+    await new Promise((r) => setTimeout(r, 5000))
+    try {
+      await callZome('sync', myDid)
+    } catch {
+      /* ignore */
+    }
+    // Check get_others periodically
+    try {
+      const others = (await callZome('get_others', null)) as string[]
+      const refFound = others.some((d: string) => d !== myDid)
+      console.log(`  Sync ${i + 1}/12... get_others: ${others.length} DIDs${refFound ? ' (REFERENCE FOUND!)' : ''}`)
+      if (refFound) break
+    } catch {
+      console.log(`  Sync ${i + 1}/12`)
+    }
+  }
 
   // Step 4: render
   console.log('\n--- Step 4: render ---')
@@ -224,21 +237,37 @@ async function main() {
     console.log('  ❌ Error:', e.message?.slice(0, 200))
   }
 
-  // Step 7: Check reference sees our link
-  console.log('\n--- Step 7: Check reference for our link ---')
-  try {
-    const refResult = await referenceQuery(
-      `{ perspectiveQueryLinks(uuid: "${REFERENCE_PERSPECTIVE}", query: {}) { data { source predicate target } author } }`
-    )
-    const links = refResult.data?.perspectiveQueryLinks || []
-    console.log(`  Reference has ${links.length} links:`)
-    for (const link of links) {
-      console.log(
-        `    ${link.data.source} → ${link.data.predicate} → ${link.data.target} (by ${link.author.slice(0, 30)}...)`
-      )
+  // Step 7: Periodic sync to broadcast, then check reference
+  console.log('\n--- Step 7: Periodic sync + check reference for our link ---')
+  for (let i = 0; i < 20; i++) {
+    try {
+      await callZome('sync', myDid)
+    } catch {
+      /* ignore */
     }
-  } catch (e: any) {
-    console.log('  Error querying reference:', e.message)
+    await new Promise((r) => setTimeout(r, 5000))
+    console.log(`  Sync iteration ${i + 1}/20...`)
+
+    try {
+      const refResult = await referenceQuery(
+        `{ perspectiveQueryLinks(uuid: "${REFERENCE_PERSPECTIVE}", query: {}) { data { source predicate target } author } }`
+      )
+      const links = refResult.data?.perspectiveQueryLinks || []
+      const ourLink = links.find((l: any) => l.data.predicate === 'test://from-ad4m-web')
+      if (ourLink) {
+        console.log(`  ✅ Reference sees our link! ${links.length} total links`)
+        for (const link of links) {
+          console.log(
+            `    ${link.data.source} → ${link.data.predicate} → ${link.data.target} (by ${link.author.slice(0, 30)}...)`
+          )
+        }
+        break
+      } else {
+        console.log(`  ⏳ Reference has ${links.length} links, ours not yet visible`)
+      }
+    } catch (e: any) {
+      console.log('  Error querying reference:', e.message)
+    }
   }
 
   console.log('\n=== Verification complete ===')

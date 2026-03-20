@@ -14,3 +14,37 @@ export function createExpressionUrl(languageAddress: string, expressionAddress: 
   if (languageAddress === 'literal') return `literal://${expressionAddress}`
   return `${languageAddress}://${expressionAddress}`
 }
+
+export async function resolveExpression(
+  url: string,
+  languageManager: {
+    getLanguage(address: string): { language: { expressionAdapter?: { get(addr: string): Promise<any> } } } | undefined
+  }
+): Promise<any | null> {
+  const { languageAddress, expressionAddress } = parseExpressionUrl(url)
+
+  if (languageAddress === 'literal') {
+    try {
+      return JSON.parse(decodeURIComponent(expressionAddress))
+    } catch {
+      return {
+        author: 'literal',
+        timestamp: new Date().toISOString(),
+        data: decodeURIComponent(expressionAddress),
+        proof: { key: '', signature: '', valid: true }
+      }
+    }
+  }
+
+  const handle = languageManager.getLanguage(languageAddress)
+  if (!handle) {
+    throw new Error(`Language not found: "${languageAddress}"`)
+  }
+
+  const adapter = handle.language.expressionAdapter
+  if (!adapter) {
+    throw new Error(`Language "${languageAddress}" has no expressionAdapter`)
+  }
+
+  return adapter.get(expressionAddress)
+}
