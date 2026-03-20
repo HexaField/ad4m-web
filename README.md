@@ -102,4 +102,4 @@ These resolve without error in the GraphQL schema but return defaults rather tha
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+CAL-1.0 (Cryptographic Autonomy License) — see [LICENSE](./LICENSE).
