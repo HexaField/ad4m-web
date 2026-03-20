@@ -1,4 +1,4 @@
-import { SHARED_CONSTANT } from '@template/core'
+import { SHARED_CONSTANT } from '@ad4m-web/core'
 import type { Component } from 'solid-js'
 import Status from '../components/Status'
 

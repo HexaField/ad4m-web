@@ -1,4 +1,4 @@
-import { SHARED_CONSTANT } from '@template/core'
+import { SHARED_CONSTANT } from '@ad4m-web/core'
 import { Router } from 'express'
 import type { Request, Response } from 'express'
 import { healthResponseSchema } from '../schemas/health'

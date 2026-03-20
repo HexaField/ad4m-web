@@ -1,5 +1,5 @@
 {
-  "name": "@template/core",
+  "name": "@ad4m-web/core",
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.ts",
@@ -18,6 +18,11 @@
     "build": "rollup -c",
     "check": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.0.1",
+    "@noble/hashes": "^2.0.1",
+    "@scure/base": "^2.0.0"
   },
   "devDependencies": {
     "@rollup/plugin-typescript": "^12.3.0",
