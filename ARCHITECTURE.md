@@ -2,12 +2,15 @@
 
 ## Overview
 
-ad4m-web runs a complete AD4M executor inside a browser tab. Where the reference implementation embeds a Rust binary with Deno and Holochain, this project is a clean-room TypeScript implementation that separates platform-agnostic logic from browser-specific bindings.
+ad4m-web runs a complete AD4M executor in pure TypeScript. Where the reference implementation embeds a Rust binary with Deno and Holochain, this project is a clean-room TypeScript implementation that separates platform-agnostic logic from environment-specific bindings.
 
-The monorepo contains two packages:
+**392 tests · ~7,500 LOC production · ~5,900 LOC tests**
 
-- **`@ad4m-web/core`** — Pure TypeScript. No `window`, `document`, `indexedDB`, `Worker`, or `WebSocket` imports. All platform-specific functionality is injected via interfaces. Can run in Node, Deno, Bun, or browser.
+The monorepo contains three packages:
+
+- **`@ad4m-web/core`** — Pure TypeScript. No `window`, `document`, `indexedDB`, `Worker`, or `WebSocket` imports. All platform-specific functionality is injected via interfaces. Can run in Node, Deno, Bun, or browser. Contains: agent crypto, JWT auth, capability system, perspectives, link store, SHACL engine, language runtime (registry, templating, expression adapter, publication), neighbourhood/sync, runtime service (friends, trusted agents, entanglement proofs, hosting stubs), and the full GraphQL schema with subscriptions.
 - **`@ad4m-web/client`** — Browser-specific implementations: IndexedDB, Web Workers, Oxigraph WASM, WebSocket Holochain bridge, cross-tab coordination. Vite + SolidJS single-page application.
+- **`@ad4m-web/server`** — Node.js bindings: HTTP/WebSocket GraphQL transport, file-system persistence.
 
 ---
 
@@ -200,25 +203,82 @@ Full GraphQL schema executed in-process — no HTTP server. The browser IS the s
 - **`PubSub`** — Simple in-memory pub/sub for GraphQL subscriptions. `publish(topic, payload)`, `subscribe(topic)` returns `AsyncIterator`. Used by agent status changes, perspective mutations, and link operations.
 - **Auth middleware** — `createAuthMiddleware()` wraps resolvers with capability checks. Validates `CapabilityClaims` from context against required permissions per operation.
 
-### 10. Capabilities & Auth
+### 10. Capability & Auth System
 
-**Files:** `core/src/agent/capabilities.ts`, `core/src/graphql/auth.ts`
+**Files:** `core/src/agent/capabilities.ts`, `core/src/agent/jwt.ts`, `core/src/graphql/auth.ts`
 
-Capability-based access control for GraphQL operations.
+Full capability-based access control with JWT tokens.
 
-- `CapabilityClaims` — `{ capabilities: string[] }` where capabilities are strings like `query`, `mutation`, `*`.
-- `hasCapability(claims, required)` — Checks if claims include the required capability or wildcard.
-- Auth middleware intercepts GraphQL resolver execution, checking the request context for valid capability claims before allowing the operation to proceed.
+- **`CapabilityService`** — Manages the capability request lifecycle:
+  1. Client calls `agentRequestCapability(authInfo)` → service stores a pending request, returns a `requestId`
+  2. User/admin approves the request
+  3. Client calls `agentGenerateJwt(requestId, rand)` → service generates a signed JWT with the approved capabilities
+  4. Subsequent requests include the JWT in context; auth middleware validates and enforces
+  5. `agentRevokeToken(requestId)` invalidates a previously issued token
 
-### 11. Language Templating
+- **JWT implementation** (`core/src/agent/jwt.ts`) — EdDSA (Ed25519) signed JWTs. `createJwt()` produces a standard 3-part token with header (`alg: EdDSA`), claims (`iss`, `exp`, `capabilities`), and signature. `verifyJwt()` validates signature, expiry, and optionally issuer DID.
 
-**Files:** `core/src/language/bundle.ts` (templating logic within bundle resolver)
+- **Auth middleware** (`core/src/graphql/auth.ts`) — `createAuthMiddleware()` wraps every GraphQL resolver. Maps operation names to required capabilities. Validates `CapabilityClaims` from request context before allowing execution.
 
-Creating new languages from templates:
+- `CapabilityClaims` — `{ capabilities: string[] }` where capabilities are `query`, `mutation`, `*` (wildcard).
 
-- `BundleResolver.resolve(address, templateParams?)` — When template parameters are provided, the resolver fetches the base language bundle and applies parameter substitution before returning the source.
-- Parameters are injected as `TEMPLATE_PARAMS` constants in the bundle source.
+### 11. Language Templating & Publication
+
+**Files:** `core/src/language/templating.ts`, `core/src/language/publication.ts`
+
+**Templating:**
+
+- `applyTemplate(bundleSource, params)` — Replaces `//!@ad4m-template-variable` comments and `{{key}}` placeholders in bundle source with provided parameter values.
 - Used by the neighbourhood system to create link languages from templates with specific DNA hashes and network seeds.
+- `languageApplyTemplateAndPublish` mutation chains template application with publication.
+
+**Publication:**
+
+- `LanguagePublisher` — In-memory content-addressed language bundle store. `publishLanguage()` SHA-256 hashes the bundle content to produce an address, stores both bundle and metadata.
+- In production, this would use a "Language Language" to publish bundles to the network.
+
+### 12. Expression System
+
+**Files:** `core/src/language/expression-adapter.ts`, `core/src/utils/expression-url.ts`
+
+Expressions are content-addressed data stored via language adapters.
+
+- **`getExpression(url)`** — Parses an expression URL (`lang://address`), finds the language, calls its `ExpressionAdapter.get(address)`.
+- **`putExpression(languageAddress, content)`** — Creates a signed expression via the language's `ExpressionAdapter.put(content)`. The adapter returns a content-addressed URL.
+- Expression URLs are `languageAddress://expressionAddress` — the `parseExprUrl()` / `createExprUrl()` utilities handle parsing and construction.
+
+### 13. Runtime Service
+
+**Files:** `core/src/runtime/`
+
+Aggregates runtime-level operations that don't belong to a specific subsystem.
+
+- **Trusted agents** — `addTrustedAgents()`, `removeTrustedAgents()`, `getTrustedAgents()`. In-memory set of DIDs trusted by the executor.
+- **Link language templates** — `addKnownLinkLanguageTemplate()`, `removeKnownLinkLanguageTemplate()`. Registry of template addresses.
+- **Friends** (`core/src/agent/friends.ts`) — `FriendService` with `addFriend()`, `removeFriend()`, `getFriends()`. In-memory DID list.
+- **Entanglement proofs** (`core/src/agent/entanglement.ts`) — `EntanglementService` with `addProofs()`, `deleteProofs()`, `getProofs()`, `preFlight()`. Generates proof structures linking agent DID to external device keys.
+- **Hosting stubs** — `getHostingUserInfo()`, `setHotWalletAddress()`, `requestPayment()`, `setUserCredits()`, `setUserFreeAccess()`. Schema-compliant but return defaults (see README placeholder section).
+- **Readiness / metrics** — `getReadiness()`, `getHcAgentInfos()`, `getNetworkMetrics()`, `getTlsDomain()`. Return defaults until wired to live subsystems.
+
+### 14. Direct Messaging
+
+**Files:** `core/src/graphql/schema.ts` (resolver), `core/src/agent/friends.ts`
+
+- `runtimeFriendSendMessage` exists in the schema but returns `false` — needs a DM language wired to message routing.
+- `runtimeFriendStatus` returns `null` — needs friend presence tracking.
+- The friends list itself (`runtimeFriends`, `runtimeAddFriend`, `runtimeRemoveFriend`) is fully functional in-memory.
+
+### 15. Full GraphQL Schema
+
+**Files:** `core/src/graphql/schema.ts`, `core/src/graphql/language-schema.ts`
+
+The schema covers every operation from the AD4M spec:
+
+**Queries:** `agent`, `agentStatus`, `agentGetEntanglementProofs`, `perspectives`, `perspective`, `perspectiveQueryLinks`, `perspectiveQueryProlog`, `perspectiveQuerySubjects`, `perspectiveGetSubjectData`, `perspectiveQuerySurreal`, `neighbourhoodOtherAgents`, `neighbourhoodOnlineAgents`, `neighbourhoodHasTelepresenceAdapter`, `runtimeInfo`, `runtimeFriends`, `runtimeFriendStatus`, `runtimeKnownLinkLanguageTemplates`, `runtimeHcAgentInfos`, `runtimeGetNetworkMetrics`, `runtimeReadiness`, `runtimeTlsDomain`, `runtimeHostingUserInfo`, `getTrustedAgents`, `runtimeFriendSendMessage`, `languages`, `languageMeta`, `languageSource`
+
+**Mutations:** `agentGenerate`, `agentLock`, `agentUnlock`, `agentUpdatePublicPerspective`, `agentUpdateDirectMessageLanguage`, `agentAddEntanglementProofs`, `agentDeleteEntanglementProofs`, `agentEntanglementProofPreFlight`, `agentSignMessage`, `agentPermitCapability`, `agentRequestCapability`, `agentGenerateJwt`, `agentRevokeToken`, `perspectiveAdd`, `perspectiveUpdate`, `perspectiveRemove`, `perspectiveAddLink`, `perspectiveAddLinks`, `perspectiveRemoveLink`, `perspectiveUpdateLink`, `perspectiveLinkMutations`, `perspectiveAddSdna`, `neighbourhoodJoinFromUrl`, `neighbourhoodPublishFromPerspective`, `neighbourhoodSetOnlineStatus`, `neighbourhoodSendSignal`, `neighbourhoodSendBroadcast`, `languageApplyTemplateAndPublish`, `languagePublish`, `languageWriteSettings`, `addTrustedAgents`, `removeTrustedAgents`, `runtimeAddFriend`, `runtimeRemoveFriend`, `runtimeAddKnownLinkLanguageTemplate`, `runtimeRemoveKnownLinkLanguageTemplate`, `runtimeSetHotWalletAddress`, `runtimeRequestPayment`, `runtimeSetUserCredits`, `runtimeSetUserFreeAccess`
+
+**Subscriptions:** `agentStatusChanged`, `perspectiveAdded`, `perspectiveUpdated`, `perspectiveRemoved`, `perspectiveLinkAdded`, `perspectiveLinkRemoved`, `neighbourhoodSignal`
 
 ---
 
@@ -384,7 +444,7 @@ GraphQL query { perspectiveQuerySubjects(uuid, className) }
 | Compiler settings | `erasableSyntaxOnly`, `noUnusedLocals`, `noUnusedParameters` |
 | Style             | No enums — const objects + type aliases throughout           |
 | Core constraints  | Zero runtime dependencies on browser or Node APIs            |
-| Testing           | Vitest — 251 core tests, 34 client tests                     |
+| Testing           | Vitest — 361 core + 30 client + 1 server = 392 tests         |
 | Client build      | Vite + SolidJS + Tailwind CSS                                |
 | Core build        | Rollup with TypeScript plugin                                |
 | Linting           | oxlint + oxfmt                                               |
