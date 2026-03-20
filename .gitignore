@@ -12,3 +12,4 @@ test-results
 
 .certs
 .holochain-data/
+holochain-client-*.tgz
