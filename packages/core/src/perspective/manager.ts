@@ -72,6 +72,10 @@ export class PerspectiveManager {
     return handle
   }
 
+  restore(handle: PerspectiveHandle): void {
+    this.perspectives.set(handle.uuid, { ...handle })
+  }
+
   update(uuid: string, name: string): PerspectiveHandle {
     const handle = this.ensurePerspective(uuid)
     handle.name = name

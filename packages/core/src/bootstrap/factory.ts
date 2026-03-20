@@ -10,15 +10,23 @@ import { InProcessLanguageHost } from '../language/host'
 import { PerspectiveManager } from '../perspective/manager'
 import { HolochainLanguageDelegateImpl } from '../holochain/delegate'
 import { Executor } from './executor'
+import type { PersistenceConfig } from '../persistence/types'
+import { PersistenceCoordinator } from '../persistence/coordinator'
 
 export interface CreateExecutorConfig {
   bootstrapConfig: BootstrapConfig
   walletStore: WalletStore
   cryptoProvider?: CryptoProvider
   holochainConductor?: HolochainConductor
+  persistenceConfig?: PersistenceConfig
 }
 
-export async function createExecutor(config: CreateExecutorConfig): Promise<Executor> {
+export interface CreateExecutorResult {
+  executor: Executor
+  persistence?: PersistenceCoordinator
+}
+
+export async function createExecutor(config: CreateExecutorConfig): Promise<CreateExecutorResult> {
   const crypto = config.cryptoProvider ?? new NobleCryptoProvider()
   const agentService = new AgentService(crypto, config.walletStore)
   const linkStore = new InMemoryLinkStore()
@@ -31,7 +39,7 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Exec
     ? new HolochainLanguageDelegateImpl(config.holochainConductor)
     : undefined
 
-  return new Executor({
+  const executor = new Executor({
     agentService,
     perspectiveManager,
     languageManager,
@@ -40,4 +48,11 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Exec
     holochainDelegate,
     bootstrapConfig: config.bootstrapConfig
   })
+
+  let persistence: PersistenceCoordinator | undefined
+  if (config.persistenceConfig) {
+    persistence = new PersistenceCoordinator(executor, config.persistenceConfig)
+  }
+
+  return { executor, persistence }
 }

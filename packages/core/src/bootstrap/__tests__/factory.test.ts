@@ -32,7 +32,7 @@ const bootstrapConfig: BootstrapConfig = {
 
 describe('createExecutor', () => {
   it('wires services correctly', async () => {
-    const executor = await createExecutor({
+    const { executor } = await createExecutor({
       bootstrapConfig,
       walletStore: new InMemoryWalletStore()
     })
@@ -45,7 +45,7 @@ describe('createExecutor', () => {
   })
 
   it('AgentService can generate and sign', async () => {
-    const executor = await createExecutor({
+    const { executor } = await createExecutor({
       bootstrapConfig,
       walletStore: new InMemoryWalletStore()
     })
@@ -57,7 +57,7 @@ describe('createExecutor', () => {
   })
 
   it('PerspectiveManager can add and query perspectives', async () => {
-    const executor = await createExecutor({
+    const { executor } = await createExecutor({
       bootstrapConfig,
       walletStore: new InMemoryWalletStore()
     })
@@ -68,7 +68,7 @@ describe('createExecutor', () => {
   })
 
   it('full flow: create → generate → initialize → add perspective → add link → query', async () => {
-    const executor = await createExecutor({
+    const { executor } = await createExecutor({
       bootstrapConfig,
       walletStore: new InMemoryWalletStore()
     })

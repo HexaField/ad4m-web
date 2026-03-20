@@ -35,7 +35,7 @@ describe('GraphQLEngine', () => {
   let engine: GraphQLEngine
 
   beforeEach(async () => {
-    const executor = await createExecutor({
+    const { executor } = await createExecutor({
       bootstrapConfig,
       walletStore: new InMemoryWalletStore()
     })
