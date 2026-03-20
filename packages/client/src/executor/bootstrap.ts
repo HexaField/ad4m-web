@@ -2,6 +2,7 @@ import { createExecutor, GraphQLEngine, InMemoryBundleResolver, InProcessBundleE
 import { BrowserWalletStore } from '../persistence/idb-wallet'
 import { IndexedDBKVStore, IndexedDBBlobStore } from '../persistence/idb-store'
 import { WebWorkerBundleExecutor } from '../language/worker-executor'
+import { OxigraphLinkStore } from '../linkstore/oxigraph-store'
 import type { Executor, PersistenceCoordinator } from '@ad4m-web/core'
 
 export interface ExecutorState {
@@ -14,6 +15,7 @@ export async function bootstrapExecutor(): Promise<ExecutorState> {
   const walletStore = new BrowserWalletStore()
   const bundleResolver = new InMemoryBundleResolver()
   const bundleExecutor = new WebWorkerBundleExecutor()
+  const linkStore = new OxigraphLinkStore()
 
   const result = await createExecutor({
     bootstrapConfig: {
@@ -27,6 +29,7 @@ export async function bootstrapExecutor(): Promise<ExecutorState> {
     walletStore,
     bundleResolver,
     bundleExecutor,
+    linkStore,
     persistenceConfig: {
       agentStore: new IndexedDBKVStore('ad4m-agent'),
       walletStore,

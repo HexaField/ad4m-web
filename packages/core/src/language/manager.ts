@@ -1,3 +1,6 @@
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
+import type { ContentStore } from '../bootstrap/types'
 import type { LanguageContext, LanguageHandle, LanguageHost, LanguageMeta } from './types'
 import type { BundleResolver, BundleExecutor } from './bundle'
 
@@ -78,5 +81,46 @@ export class LanguageManager {
 
   getAllInstalled(): LanguageMeta[] {
     return [...this.metadata.values()]
+  }
+
+  async applyTemplateAndPublish(
+    sourceAddress: string,
+    templateData: string,
+    contentStore?: ContentStore
+  ): Promise<{ address: string; meta: LanguageMeta }> {
+    if (!this.bundleResolver) {
+      throw new Error('No bundle resolver configured')
+    }
+
+    const sourceBundle = await this.bundleResolver.resolve(sourceAddress)
+    if (!sourceBundle) {
+      throw new Error(`Source language not found: "${sourceAddress}"`)
+    }
+
+    const params: Record<string, string> = JSON.parse(templateData)
+    let result = sourceBundle
+    for (const [key, value] of Object.entries(params)) {
+      result = result.replaceAll(`{{${key}}}`, value)
+    }
+
+    const hash = bytesToHex(sha256(new TextEncoder().encode(result)))
+
+    if (contentStore) {
+      await contentStore.put(result)
+    }
+
+    const sourceMeta = this.metadata.get(sourceAddress)
+    const meta: LanguageMeta = {
+      address: hash,
+      name: sourceMeta?.name ?? 'templated-language',
+      author: sourceMeta?.author ?? 'unknown',
+      description: sourceMeta?.description,
+      templated: true,
+      templateSourceLanguageAddress: sourceAddress,
+      templateAppliedParams: templateData
+    }
+
+    this.metadata.set(hash, meta)
+    return { address: hash, meta }
   }
 }

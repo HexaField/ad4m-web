@@ -2,7 +2,7 @@ import type { BootstrapConfig } from './types'
 import type { CryptoProvider, WalletStore, Link } from '../agent/types'
 import type { HolochainConductor } from '../holochain/types'
 import type { BundleResolver, BundleExecutor } from '../language/bundle'
-import type { LinkExpression } from '../linkstore/types'
+import type { LinkExpression, LinkStore } from '../linkstore/types'
 import { NobleCryptoProvider } from '../agent/crypto'
 import { AgentService } from '../agent/agent'
 import { verifyExpression } from '../agent/signing'
@@ -27,6 +27,8 @@ export interface CreateExecutorConfig {
   persistenceConfig?: PersistenceConfig
   bundleResolver?: BundleResolver
   bundleExecutor?: BundleExecutor
+  /** Optional custom LinkStore implementation (e.g. OxigraphLinkStore). Defaults to InMemoryLinkStore. */
+  linkStore?: LinkStore
 }
 
 export interface CreateExecutorResult {
@@ -38,7 +40,7 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Crea
   const crypto = config.cryptoProvider ?? new NobleCryptoProvider()
   const pubsub = new PubSub()
   const agentService = new AgentService(crypto, config.walletStore, pubsub)
-  const linkStore = new InMemoryLinkStore()
+  const linkStore = config.linkStore ?? new InMemoryLinkStore()
   const shaclEngine = new ShaclEngine(linkStore)
   const languageHost = new InProcessLanguageHost()
   const languageManager = new LanguageManager(languageHost)

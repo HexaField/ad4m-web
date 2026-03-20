@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      oxigraph:
+        specifier: ^0.5.6
+        version: 0.5.6
     devDependencies:
       '@fastify/pre-commit':
         specifier: ^2.2.1
@@ -1955,6 +1959,9 @@ packages:
     resolution: {integrity: sha512-dh4rlNBua93aVf2ZaDecbQxVLMnUUTvDi1K1fdvBdontQeEf6K22Z1KQg5QKl2D9aNFeFph+wOVwcjjYUIO6Mw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  oxigraph@0.5.6:
+    resolution: {integrity: sha512-tACXVQY7lpQ5Nx9vrIpl9sdFMXPOhx9bS3ET5OU+t18IqKsapsk6JtL4LMKZMoU0D0Vn0VA6STGqt8Elmy5Pjw==}
 
   oxlint@1.38.0:
     resolution: {integrity: sha512-XT7tBinQS+hVLxtfJOnokJ9qVBiQvZqng40tDgR6qEJMRMnpVq/JwYfbYyGntSq8MO+Y+N9M1NG4bAMFUtCJiw==}
@@ -4217,6 +4224,8 @@ snapshots:
       '@oxfmt/linux-x64-musl': 0.23.0
       '@oxfmt/win32-arm64': 0.23.0
       '@oxfmt/win32-x64': 0.23.0
+
+  oxigraph@0.5.6: {}
 
   oxlint@1.38.0:
     optionalDependencies:

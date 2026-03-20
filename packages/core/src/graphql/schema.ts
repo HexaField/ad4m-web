@@ -122,6 +122,14 @@ const LinkQueryInputType = new GraphQLInputObjectType({
   }
 })
 
+const LanguageRefType = new GraphQLObjectType({
+  name: 'LanguageRef',
+  fields: {
+    address: { type: new GraphQLNonNull(GraphQLString) },
+    name: { type: new GraphQLNonNull(GraphQLString) }
+  }
+})
+
 function serializeAgentStatus(status: ReturnType<Executor['agentService']['getStatus']>) {
   return {
     ...status,
@@ -305,6 +313,20 @@ export function createSchema(executor: Executor): GraphQLSchema {
           }
           const meta = JSON.parse(args.meta)
           return executor.neighbourhoodManager.publishFromPerspective(args.uuid, args.linkLanguage, meta)
+        }
+      },
+      languageApplyTemplateAndPublish: {
+        type: new GraphQLNonNull(LanguageRefType),
+        args: {
+          sourceLanguageHash: { type: new GraphQLNonNull(GraphQLString) },
+          templateData: { type: new GraphQLNonNull(GraphQLString) }
+        },
+        resolve: async (_: unknown, args: { sourceLanguageHash: string; templateData: string }) => {
+          const result = await executor.languageManager.applyTemplateAndPublish(
+            args.sourceLanguageHash,
+            args.templateData
+          )
+          return { address: result.address, name: result.meta.name }
         }
       }
     }
