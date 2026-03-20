@@ -6,15 +6,24 @@ import solid from 'vite-plugin-solid'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+
+  const certPath = path.resolve(process.cwd(), '../../.certs/localhost.cert')
+  const keyPath = path.resolve(process.cwd(), '../../.certs/localhost.key')
+  const hasHttpsCerts = fs.existsSync(certPath) && fs.existsSync(keyPath)
+
   return {
     plugins: [solid(), tailwindcss()],
     server: {
       host: env.HOST || 'localhost',
       port: parseInt(env.PORT || '3000'),
-      https: {
-        key: fs.readFileSync(path.resolve(process.cwd(), '../../.certs/localhost.key')),
-        cert: fs.readFileSync(path.resolve(process.cwd(), '../../.certs/localhost.cert'))
-      }
+      ...(hasHttpsCerts
+        ? {
+            https: {
+              key: fs.readFileSync(keyPath),
+              cert: fs.readFileSync(certPath)
+            }
+          }
+        : {})
     }
   }
 })
