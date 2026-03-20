@@ -379,7 +379,11 @@ GenerateAgentPubKey → InstallApp → EnableApp → AttachAppInterface → Issu
 
 **App API:** After authentication, `CallZome` requests include cell_id, zome/fn names, msgpack-encoded payload, provenance (agent key), nonce, and microsecond expiry timestamp.
 
-**Network topology:** Each browser connects to its own conductor. Conductors peer with each other via WebRTC through a bootstrap server (`https://bootstrap.ad4m.dev:4433`). The p-diff-sync DNA provides the link synchronization protocol between agents.
+**Capability grants** are issued via the admin interface (`grant_zome_call_capability`), not zome calls. ad4m-web generates a separate Ed25519 signing keypair, wraps its public key as an `AgentPubKey`, and grants capabilities to it. `CapSecret` is 64 bytes. See `docs/holochain-setup.md` for the full wire protocol reference.
+
+**Network topology:** Each browser connects to its own conductor. Conductors peer with each other via kitsune2 through the official Holochain bootstrap/signal servers (`dev-test-bootstrap2.holochain.org`). The p-diff-sync DNA provides the link synchronization protocol between agents.
+
+**Interoperability:** ad4m-web conductors can join neighbourhoods created by the reference AD4M executor. The hApp DNA is extracted from the language bundle source at join time, ensuring the same DNA hash. DHT peer discovery between ad4m-web and reference AD4M has been verified working.
 
 ---
 

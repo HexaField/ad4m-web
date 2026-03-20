@@ -73,6 +73,9 @@ pnpm test         # 392 tests (361 core + 30 client + 1 server)
 - ✅ IndexedDB persistence with auto-save (browser)
 - ✅ Holochain conductor bridge (WebSocket, msgpack wire protocol)
 - ✅ Reconnecting conductor with exponential backoff
+- ✅ DNA extraction from language bundles at neighbourhood join
+- ✅ Admin-granted capability tokens for zome call signing
+- ✅ Cross-machine DHT peer discovery with reference AD4M
 
 ## Placeholder Implementations
 
