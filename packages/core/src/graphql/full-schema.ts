@@ -1,39 +1,44 @@
-import { createSchema } from './schema'
+import {
+  createSchema,
+  AgentStatusType,
+  PerspectiveHandleType,
+  LinkExpressionType,
+  LinkExpressionUpdatedType,
+  PerspectiveExpressionType,
+  ExceptionInfoType,
+  PerspectiveStateEnum,
+  LinkStatusEnum,
+  DecoratedPerspectiveDiffType
+} from './schema'
 import { PubSub, createAsyncIterator } from './subscriptions'
 import { GraphQLObjectType, GraphQLString, GraphQLNonNull, GraphQLSchema } from 'graphql'
 import type { Executor } from '../bootstrap/executor'
 import type { CapabilityService } from './capability-service'
 
-/**
- * Creates a full GraphQL schema with Query, Mutation, and Subscription types.
- * Wraps the base schema from schema.ts and adds subscription support.
- */
-export function createFullSchema(executor: Executor, pubsub: PubSub, capabilityService?: CapabilityService): GraphQLSchema {
+export function createFullSchema(
+  executor: Executor,
+  pubsub: PubSub,
+  capabilityService?: CapabilityService
+): GraphQLSchema {
   const baseSchema = createSchema(executor, capabilityService)
-
   const queryType = baseSchema.getQueryType()!
   const mutationType = baseSchema.getMutationType()!
-
-  // Retrieve named types from the base schema for subscription field types
-  const AgentStatusType = baseSchema.getType('AgentStatus')!
-  const PerspectiveHandleType = baseSchema.getType('PerspectiveHandle')!
-  const LinkExpressionType = baseSchema.getType('LinkExpression')!
 
   const subscriptionType = new GraphQLObjectType({
     name: 'Subscription',
     fields: {
       agentStatusChanged: {
-        type: new GraphQLNonNull(AgentStatusType as any),
+        type: new GraphQLNonNull(AgentStatusType),
         subscribe: () => createAsyncIterator(pubsub, 'agentStatusChanged'),
         resolve: (event: any) => event
       },
       perspectiveAdded: {
-        type: new GraphQLNonNull(PerspectiveHandleType as any),
+        type: new GraphQLNonNull(PerspectiveHandleType),
         subscribe: () => createAsyncIterator(pubsub, 'perspectiveAdded'),
         resolve: (event: any) => event
       },
       perspectiveUpdated: {
-        type: new GraphQLNonNull(PerspectiveHandleType as any),
+        type: new GraphQLNonNull(PerspectiveHandleType),
         subscribe: () => createAsyncIterator(pubsub, 'perspectiveUpdated'),
         resolve: (event: any) => event
       },
@@ -43,18 +48,25 @@ export function createFullSchema(executor: Executor, pubsub: PubSub, capabilityS
         resolve: (event: any) => event
       },
       perspectiveLinkAdded: {
-        type: new GraphQLNonNull(LinkExpressionType as any),
+        type: new GraphQLNonNull(LinkExpressionType),
         args: { uuid: { type: new GraphQLNonNull(GraphQLString) } },
         subscribe: (_: any, args: { uuid: string }) =>
           createAsyncIterator(pubsub, 'perspectiveLinkAdded', (e: any) => e.uuid === args.uuid),
         resolve: (event: any) => event.link
       },
       perspectiveLinkRemoved: {
-        type: new GraphQLNonNull(LinkExpressionType as any),
+        type: new GraphQLNonNull(LinkExpressionType),
         args: { uuid: { type: new GraphQLNonNull(GraphQLString) } },
         subscribe: (_: any, args: { uuid: string }) =>
           createAsyncIterator(pubsub, 'perspectiveLinkRemoved', (e: any) => e.uuid === args.uuid),
         resolve: (event: any) => event.link
+      },
+      perspectiveLinkUpdated: {
+        type: new GraphQLNonNull(LinkExpressionUpdatedType),
+        args: { uuid: { type: new GraphQLNonNull(GraphQLString) } },
+        subscribe: (_: any, args: { uuid: string }) =>
+          createAsyncIterator(pubsub, 'perspectiveLinkUpdated', (e: any) => e.uuid === args.uuid),
+        resolve: (event: any) => event
       },
       perspectiveSyncStateChange: {
         type: new GraphQLNonNull(GraphQLString),
@@ -62,6 +74,23 @@ export function createFullSchema(executor: Executor, pubsub: PubSub, capabilityS
         subscribe: (_: any, args: { uuid: string }) =>
           createAsyncIterator(pubsub, 'perspectiveSyncStateChange', (e: any) => e.uuid === args.uuid),
         resolve: (event: any) => event.state
+      },
+      neighbourhoodSignal: {
+        type: new GraphQLNonNull(PerspectiveExpressionType),
+        args: { perspectiveUUID: { type: new GraphQLNonNull(GraphQLString) } },
+        subscribe: (_: any, args: { perspectiveUUID: string }) =>
+          createAsyncIterator(pubsub, 'neighbourhoodSignal', (e: any) => e.perspectiveUUID === args.perspectiveUUID),
+        resolve: (event: any) => event.signal
+      },
+      exceptionOccurred: {
+        type: new GraphQLNonNull(ExceptionInfoType),
+        subscribe: () => createAsyncIterator(pubsub, 'exceptionOccurred'),
+        resolve: (event: any) => event
+      },
+      runtimeMessageReceived: {
+        type: new GraphQLNonNull(PerspectiveExpressionType),
+        subscribe: () => createAsyncIterator(pubsub, 'runtimeMessageReceived'),
+        resolve: (event: any) => event
       }
     }
   })
@@ -69,6 +98,7 @@ export function createFullSchema(executor: Executor, pubsub: PubSub, capabilityS
   return new GraphQLSchema({
     query: queryType,
     mutation: mutationType,
-    subscription: subscriptionType
+    subscription: subscriptionType,
+    types: [PerspectiveStateEnum, LinkStatusEnum, DecoratedPerspectiveDiffType]
   })
 }
