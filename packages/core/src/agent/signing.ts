@@ -13,7 +13,7 @@ function hexDecode(hex: string): Uint8Array {
   return bytes
 }
 
-function computeHash(crypto: CryptoProvider, json: string, timestamp: string): Uint8Array {
+async function computeHash(crypto: CryptoProvider, json: string, timestamp: string): Promise<Uint8Array> {
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(json)
   const tsBytes = encoder.encode(timestamp)
@@ -31,7 +31,7 @@ export async function signExpression(
 ): Promise<Expression<unknown>> {
   const json = JSON.stringify(data)
   const timestamp = new Date().toISOString()
-  const hash = computeHash(crypto, json, timestamp)
+  const hash = await computeHash(crypto, json, timestamp)
   const signature = await crypto.sign(privateKey, hash)
 
   const proof: ExpressionProof = {
@@ -46,7 +46,7 @@ export async function verifyExpression(expr: Expression<unknown>, crypto: Crypto
   try {
     const publicKey = didToPublicKey(expr.proof.key)
     const json = JSON.stringify(expr.data)
-    const hash = computeHash(crypto, json, expr.timestamp)
+    const hash = await computeHash(crypto, json, expr.timestamp)
     const signature = hexDecode(expr.proof.signature)
     const valid = await crypto.verify(publicKey, signature, hash)
     return { valid }

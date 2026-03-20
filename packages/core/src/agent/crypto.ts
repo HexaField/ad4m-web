@@ -17,7 +17,7 @@ export class NobleCryptoProvider implements CryptoProvider {
     return ed.verifyAsync(signature, message, publicKey)
   }
 
-  sha256(data: Uint8Array): Uint8Array {
+  async sha256(data: Uint8Array): Promise<Uint8Array> {
     return sha256(data)
   }
 }

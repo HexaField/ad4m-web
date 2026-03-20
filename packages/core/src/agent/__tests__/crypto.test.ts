@@ -38,8 +38,8 @@ describe('NobleCryptoProvider', () => {
     expect(valid).toBe(false)
   })
 
-  it('sha256 produces 32 bytes', () => {
-    const hash = crypto.sha256(new TextEncoder().encode('test'))
+  it('sha256 produces 32 bytes', async () => {
+    const hash = await crypto.sha256(new TextEncoder().encode('test'))
     expect(hash).toBeInstanceOf(Uint8Array)
     expect(hash.length).toBe(32)
   })

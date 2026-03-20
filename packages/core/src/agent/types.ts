@@ -2,7 +2,7 @@ export interface CryptoProvider {
   generateKeyPair(): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }>
   sign(privateKey: Uint8Array, message: Uint8Array): Promise<Uint8Array>
   verify(publicKey: Uint8Array, signature: Uint8Array, message: Uint8Array): Promise<boolean>
-  sha256(data: Uint8Array): Uint8Array
+  sha256(data: Uint8Array): Promise<Uint8Array>
 }
 
 export interface WalletStore {

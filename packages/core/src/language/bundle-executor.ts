@@ -1,5 +1,14 @@
 import type { Language, LanguageContext } from './types'
 import type { BundleExecutor, LanguageBundleExports } from './bundle'
+import { sha256 } from '@noble/hashes/sha2.js'
+
+const UTILS = {
+  hash(data: string): string {
+    const bytes = new TextEncoder().encode(data)
+    const h = sha256(bytes)
+    return Array.from(h, (b) => b.toString(16).padStart(2, '0')).join('')
+  }
+}
 
 /**
  * Simple in-process executor that uses the Function constructor.
@@ -8,10 +17,15 @@ import type { BundleExecutor, LanguageBundleExports } from './bundle'
 export class InProcessBundleExecutor implements BundleExecutor {
   async execute(source: string, context: LanguageContext): Promise<Language> {
     const moduleObj = { exports: {} as any }
-    const fn = new Function('module', 'exports', 'require', source)
-    fn(moduleObj, moduleObj.exports, () => {
-      throw new Error('require not supported')
-    })
+    const fn = new Function('module', 'exports', 'require', 'UTILS', source)
+    fn(
+      moduleObj,
+      moduleObj.exports,
+      () => {
+        throw new Error('require not supported')
+      },
+      UTILS
+    )
 
     const exports = moduleObj.exports as LanguageBundleExports
     if (typeof exports.create !== 'function') {

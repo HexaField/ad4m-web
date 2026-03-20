@@ -285,8 +285,11 @@ export function createSchema(executor: Executor): GraphQLSchema {
       neighbourhoodJoinFromUrl: {
         type: new GraphQLNonNull(PerspectiveHandleType),
         args: { url: { type: new GraphQLNonNull(GraphQLString) } },
-        resolve: () => {
-          throw new Error('neighbourhoodJoinFromUrl requires NeighbourhoodManager (not yet wired to Executor)')
+        resolve: async (_: unknown, args: { url: string }) => {
+          if (!executor.neighbourhoodManager) {
+            throw new Error('NeighbourhoodManager not available')
+          }
+          return executor.neighbourhoodManager.joinFromUrl(args.url)
         }
       },
       neighbourhoodPublishFromPerspective: {
@@ -296,10 +299,12 @@ export function createSchema(executor: Executor): GraphQLSchema {
           linkLanguage: { type: new GraphQLNonNull(GraphQLString) },
           meta: { type: new GraphQLNonNull(GraphQLString) }
         },
-        resolve: () => {
-          throw new Error(
-            'neighbourhoodPublishFromPerspective requires NeighbourhoodManager (not yet wired to Executor)'
-          )
+        resolve: async (_: unknown, args: { uuid: string; linkLanguage: string; meta: string }) => {
+          if (!executor.neighbourhoodManager) {
+            throw new Error('NeighbourhoodManager not available')
+          }
+          const meta = JSON.parse(args.meta)
+          return executor.neighbourhoodManager.publishFromPerspective(args.uuid, args.linkLanguage, meta)
         }
       }
     }

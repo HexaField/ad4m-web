@@ -4,6 +4,7 @@ import type { ShaclEngine } from '../shacl/engine'
 import type { LanguageManager } from '../language/manager'
 import type { HolochainLanguageDelegate } from '../language/types'
 import type { PerspectiveManager } from '../perspective/manager'
+import type { NeighbourhoodManager } from '../neighbourhood/manager'
 
 export interface ExecutorDeps {
   agentService: AgentServiceInterface
@@ -13,6 +14,7 @@ export interface ExecutorDeps {
   linkStore: LinkStore
   holochainDelegate?: HolochainLanguageDelegate
   bootstrapConfig: BootstrapConfig
+  neighbourhoodManager?: NeighbourhoodManager
 }
 
 export class Executor implements ExecutorInterface {
@@ -23,6 +25,7 @@ export class Executor implements ExecutorInterface {
   readonly linkStore: LinkStore
   readonly holochainDelegate?: HolochainLanguageDelegate
   readonly bootstrapConfig: BootstrapConfig
+  readonly neighbourhoodManager?: NeighbourhoodManager
   private _isReady = false
 
   constructor(deps: ExecutorDeps) {
@@ -33,6 +36,7 @@ export class Executor implements ExecutorInterface {
     this.linkStore = deps.linkStore
     this.holochainDelegate = deps.holochainDelegate
     this.bootstrapConfig = deps.bootstrapConfig
+    this.neighbourhoodManager = deps.neighbourhoodManager
   }
 
   get isReady(): boolean {
