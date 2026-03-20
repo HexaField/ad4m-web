@@ -129,19 +129,12 @@ export class NeighbourhoodManager {
           happBytes
         )
 
-        // Register the language with the host
-        langHandle = await this.languageManager.install(
-          linkLanguageAddress,
-          this.languageManager.getMeta(linkLanguageAddress) ?? {
-            address: linkLanguageAddress,
-            name: 'p-diff-sync',
-            author: neighbourhoodExpr.author
-          },
-          undefined,
-          context
-        )
-        // Override with our Holochain-backed language
-        langHandle.language = language
+        // Register directly as a loaded language handle
+        langHandle = {
+          address: linkLanguageAddress,
+          name: language.name,
+          language
+        }
       }
     }
 
