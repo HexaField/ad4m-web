@@ -95,6 +95,11 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Crea
     ? new HolochainLanguageDelegateImpl(config.holochainConductor)
     : undefined
 
+  // Wire Holochain delegate into language context so bundle execution can use it
+  if (holochainDelegate) {
+    languageContext.Holochain = holochainDelegate
+  }
+
   // Create NeighbourhoodManager
   const contentStore = new InMemoryContentStore()
   const signExpression = (data: any) => agentService.createSignedExpression(data)
@@ -102,7 +107,9 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Crea
     perspectiveManager,
     languageManager,
     contentStore,
-    signExpression
+    signExpression,
+    config.holochainConductor,
+    languageContext
   )
 
   const executor = new Executor({

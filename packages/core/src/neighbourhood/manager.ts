@@ -2,7 +2,10 @@ import type { Expression } from '../agent/types'
 import type { ContentStore } from '../bootstrap/types'
 import type { LinkExpression } from '../linkstore/types'
 import type { LanguageManager } from '../language/manager'
-import type { OnlineAgent } from '../language/types'
+import type { LanguageContext, OnlineAgent } from '../language/types'
+import type { HolochainConductor } from '../holochain/types'
+import { HolochainLanguageDelegateImpl } from '../holochain/delegate'
+import { createPDiffSyncLanguage } from '../language/p-diff-sync'
 import type { PerspectiveManager } from '../perspective/manager'
 import { PerspectiveState, type PerspectiveHandle } from '../perspective/types'
 import type { NeighbourhoodExpression, Neighbourhood } from './types'
@@ -15,17 +18,59 @@ export class NeighbourhoodManager {
   private languageManager: LanguageManager
   private contentStore: ContentStore
   private sign: SignExpressionFn
+  private holochainConductor?: HolochainConductor
+  private baseLanguageContext?: LanguageContext
 
   constructor(
     perspectiveManager: PerspectiveManager,
     languageManager: LanguageManager,
     contentStore: ContentStore,
-    sign: SignExpressionFn
+    sign: SignExpressionFn,
+    holochainConductor?: HolochainConductor,
+    baseLanguageContext?: LanguageContext
   ) {
     this.perspectiveManager = perspectiveManager
     this.languageManager = languageManager
     this.contentStore = contentStore
     this.sign = sign
+    this.holochainConductor = holochainConductor
+    this.baseLanguageContext = baseLanguageContext
+  }
+
+  /**
+   * Extract the network seed (uid) from a neighbourhood's link language metadata.
+   */
+  private extractNetworkSeed(linkLanguageAddress: string): string | undefined {
+    const meta = this.languageManager.getMeta(linkLanguageAddress)
+    if (meta?.templateAppliedParams) {
+      try {
+        const params = JSON.parse(meta.templateAppliedParams)
+        return params.uid
+      } catch {
+        // not valid JSON
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * Extract hApp bytes from a language bundle source string.
+   * Looks for the base64-encoded BUNDLE export in the bundle JS.
+   */
+  private extractHappBytesFromBundle(bundleSource: string): Uint8Array | null {
+    // The bundle embeds the hApp as a base64 string in a variable like:
+    // var happ_default = "base64data..."
+    // or BUNDLE = Buffer.from(happ_default, "base64")
+    // Look for a large base64 string assignment
+    const match = bundleSource.match(/var\s+happ_default\s*=\s*"([A-Za-z0-9+/=]{1000,})"/)
+    if (match) {
+      const b64 = match[1]
+      const binary = atob(b64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      return bytes
+    }
+    return null
   }
 
   async joinFromUrl(url: string): Promise<PerspectiveHandle> {
@@ -45,8 +90,62 @@ export class NeighbourhoodManager {
     handle.sharedUrl = url
     handle.neighbourhood = neighbourhoodExpr
 
+    // Check if language is already loaded
+    let langHandle = this.languageManager.getLanguage(linkLanguageAddress)
+
+    // If not loaded and we have a Holochain conductor, try to install from the language bundle
+    if (!langHandle?.language.linksAdapter && this.holochainConductor && this.baseLanguageContext) {
+      const networkSeed = this.extractNetworkSeed(linkLanguageAddress)
+
+      // Try to get the bundle source and extract hApp bytes
+      let happBytes: Uint8Array | null = null
+      try {
+        const source = this.languageManager.getLanguageSource(linkLanguageAddress)
+        happBytes = this.extractHappBytesFromBundle(source)
+      } catch {
+        // Source not available — check the template source language
+        const meta = this.languageManager.getMeta(linkLanguageAddress)
+        if (meta?.templateSourceLanguageAddress) {
+          try {
+            const source = this.languageManager.getLanguageSource(meta.templateSourceLanguageAddress)
+            happBytes = this.extractHappBytesFromBundle(source)
+          } catch {
+            // No source available
+          }
+        }
+      }
+
+      if (happBytes) {
+        // Create a per-neighbourhood delegate with the correct network seed
+        const delegate = new HolochainLanguageDelegateImpl(this.holochainConductor, networkSeed)
+        const context: LanguageContext = {
+          ...this.baseLanguageContext,
+          Holochain: delegate
+        }
+
+        const language = await createPDiffSyncLanguage(
+          `p-diff-sync-${linkLanguageAddress.slice(0, 8)}`,
+          context,
+          happBytes
+        )
+
+        // Register the language with the host
+        langHandle = await this.languageManager.install(
+          linkLanguageAddress,
+          this.languageManager.getMeta(linkLanguageAddress) ?? {
+            address: linkLanguageAddress,
+            name: 'p-diff-sync',
+            author: neighbourhoodExpr.author
+          },
+          undefined,
+          context
+        )
+        // Override with our Holochain-backed language
+        langHandle.language = language
+      }
+    }
+
     // Wire the link language's sync adapter into the perspective
-    const langHandle = this.languageManager.getLanguage(linkLanguageAddress)
     if (langHandle?.language.linksAdapter) {
       await this.perspectiveManager.startSync(handle.uuid, langHandle.language.linksAdapter)
     }

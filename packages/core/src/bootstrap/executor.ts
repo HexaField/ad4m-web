@@ -71,7 +71,7 @@ export class Executor implements ExecutorInterface {
     if (languages && this.languageManager) {
       for (const [name, address] of Object.entries(languages)) {
         try {
-          await this.languageManager.install(address)
+          await this.languageManager.install(address, { address, name, author: 'bootstrap' })
         } catch (err) {
           // Bootstrap language loading is best-effort — languages may not be available yet
           // (e.g., no network, no bundle resolver configured)
