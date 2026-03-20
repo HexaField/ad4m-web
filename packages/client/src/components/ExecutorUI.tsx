@@ -262,12 +262,10 @@ function PerspectiveCard(props: { executor: Executor; handle: any; onRemove: () 
 
 function GraphQLConsole(props: { graphql: GraphQLEngine }) {
   const [query, setQuery] = createSignal(`{
-  agent {
-    status {
-      isInitialized
-      isUnlocked
-      did
-    }
+  agentStatus {
+    isInitialized
+    isUnlocked
+    did
   }
 }`)
   const [result, setResult] = createSignal('')
