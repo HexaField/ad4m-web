@@ -45,14 +45,12 @@ export class NeighbourhoodManager {
     handle.sharedUrl = url
     handle.neighbourhood = neighbourhoodExpr
 
-    try {
-      // Record the link language address (actual loading deferred)
-      // Check if already installed; if not, just note it
-      this.languageManager.getLanguage(linkLanguageAddress)
-      handle.state = PerspectiveState.Synced
-    } catch {
-      handle.state = PerspectiveState.Synced
+    // Wire the link language's sync adapter into the perspective
+    const langHandle = this.languageManager.getLanguage(linkLanguageAddress)
+    if (langHandle?.language.linksAdapter) {
+      this.perspectiveManager.setLinkLanguage(handle.uuid, langHandle.language.linksAdapter)
     }
+    handle.state = PerspectiveState.Synced
 
     return handle
   }
@@ -88,6 +86,13 @@ export class NeighbourhoodManager {
 
     handle.sharedUrl = neighbourhoodUrl
     handle.neighbourhood = neighbourhoodExpr
+
+    // Wire the link language's sync adapter into the perspective
+    const langHandle = this.languageManager.getLanguage(linkLanguageAddress)
+    if (langHandle?.language.linksAdapter) {
+      this.perspectiveManager.setLinkLanguage(uuid, langHandle.language.linksAdapter)
+    }
+
     handle.state = PerspectiveState.Synced
 
     return neighbourhoodUrl

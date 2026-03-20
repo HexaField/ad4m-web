@@ -1,6 +1,13 @@
 import { createSignal, For, Show } from 'solid-js'
 import type { Executor, GraphQLEngine } from '@ad4m-web/core'
-import { HolochainConnectionState } from '@ad4m-web/core'
+import {
+  HolochainConnectionState,
+  SharedLinkStore,
+  createSharedLinkLanguage,
+  InMemoryContentStore,
+  NeighbourhoodManager,
+  createExecutor
+} from '@ad4m-web/core'
 import { WebSocketHolochainConductor } from '../holochain/ws-conductor'
 
 interface Props {
@@ -15,6 +22,7 @@ export default function ExecutorUI(props: Props) {
       <LanguagesPanel executor={props.executor} />
       <HolochainPanel />
       <PerspectivesPanel executor={props.executor} />
+      <NeighbourhoodSyncDemo />
       <GraphQLConsole graphql={props.graphql} />
     </div>
   )
@@ -460,6 +468,223 @@ function PerspectiveCard(props: { executor: Executor; handle: any; onRemove: () 
         </div>
       </Show>
     </div>
+  )
+}
+
+class InMemoryWalletStore {
+  private data: string | null = null
+  async load(): Promise<string | null> {
+    return this.data
+  }
+  async save(data: string): Promise<void> {
+    this.data = data
+  }
+  async clear(): Promise<void> {
+    this.data = null
+  }
+}
+
+function NeighbourhoodSyncDemo() {
+  const [log, setLog] = createSignal<string[]>([])
+  const [running, setRunning] = createSignal(false)
+  const [agentALinks, setAgentALinks] = createSignal<any[]>([])
+  const [agentBLinks, setAgentBLinks] = createSignal<any[]>([])
+
+  const addLog = (msg: string) => setLog((prev) => [...prev, msg])
+
+  const bootstrapConfig = {
+    languages: {
+      languageLanguageAddress: 'system-language-language',
+      agentLanguageAddress: 'system-agent-language',
+      neighbourhoodLanguageAddress: 'system-neighbourhood-language',
+      perspectiveLanguageAddress: 'system-perspective-language'
+    }
+  }
+
+  const runDemo = async () => {
+    setRunning(true)
+    setLog([])
+    setAgentALinks([])
+    setAgentBLinks([])
+
+    try {
+      const sharedStore = new SharedLinkStore()
+      const contentStore = new InMemoryContentStore()
+
+      // Create Agent A
+      addLog('Creating Agent A...')
+      const resultA = await createExecutor({ bootstrapConfig, walletStore: new InMemoryWalletStore() })
+      const agentA = resultA.executor
+      await agentA.agentService.generate('passA')
+      const didA = agentA.agentService.getStatus().did!
+      addLog(`Agent A DID: ${didA.slice(0, 24)}...`)
+
+      // Install shared link language on A
+      const linkLangA = createSharedLinkLanguage('demo-sync', sharedStore, didA)
+      const ctxA = {
+        agent: { did: didA, createSignedExpression: async (d: any) => d },
+        signatures: { verify: async () => true },
+        storageDirectory: '',
+        customSettings: {},
+        ad4mSignal: () => {}
+      }
+      const hostA = (agentA.languageManager as any).host
+      await hostA.load('shared-link-lang', linkLangA, ctxA)
+      ;(agentA.languageManager as any).metadata.set('shared-link-lang', {
+        address: 'shared-link-lang',
+        name: 'shared-link-language',
+        author: 'demo'
+      })
+
+      // Agent A publishes neighbourhood
+      addLog('Agent A publishing neighbourhood...')
+      const perspA = agentA.perspectiveManager.add('Demo Shared Space')
+      const nhManagerA = new NeighbourhoodManager(
+        agentA.perspectiveManager,
+        agentA.languageManager,
+        contentStore,
+        async (data) => ({ author: didA, data, proof: { key: '', signature: '' }, timestamp: new Date().toISOString() })
+      )
+      const nhUrl = await nhManagerA.publishFromPerspective(perspA.uuid, 'shared-link-lang', { links: [] })
+      addLog(`Neighbourhood URL: ${nhUrl}`)
+
+      // Agent A adds a link
+      addLog('Agent A adding link...')
+      await agentA.perspectiveManager.addLink(perspA.uuid, {
+        source: 'ad4m://agentA',
+        target: 'literal://string:Hello from A!',
+        predicate: 'ad4m://message'
+      })
+      const aLinks1 = await agentA.perspectiveManager.queryLinks(perspA.uuid, {})
+      setAgentALinks([...aLinks1])
+      addLog(`Agent A has ${aLinks1.length} link(s)`)
+
+      // Create Agent B
+      addLog('Creating Agent B...')
+      const resultB = await createExecutor({ bootstrapConfig, walletStore: new InMemoryWalletStore() })
+      const agentB = resultB.executor
+      await agentB.agentService.generate('passB')
+      const didB = agentB.agentService.getStatus().did!
+      addLog(`Agent B DID: ${didB.slice(0, 24)}...`)
+
+      // Install shared link language on B (same store)
+      const linkLangB = createSharedLinkLanguage('demo-sync', sharedStore, didB)
+      const ctxB = {
+        agent: { did: didB, createSignedExpression: async (d: any) => d },
+        signatures: { verify: async () => true },
+        storageDirectory: '',
+        customSettings: {},
+        ad4mSignal: () => {}
+      }
+      const hostB = (agentB.languageManager as any).host
+      await hostB.load('shared-link-lang', linkLangB, ctxB)
+      ;(agentB.languageManager as any).metadata.set('shared-link-lang', {
+        address: 'shared-link-lang',
+        name: 'shared-link-language',
+        author: 'demo'
+      })
+
+      // Agent B joins
+      addLog('Agent B joining neighbourhood...')
+      const nhManagerB = new NeighbourhoodManager(
+        agentB.perspectiveManager,
+        agentB.languageManager,
+        contentStore,
+        async (data) => ({ author: didB, data, proof: { key: '', signature: '' }, timestamp: new Date().toISOString() })
+      )
+      const perspBHandle = await nhManagerB.joinFromUrl(nhUrl)
+      addLog(`Agent B joined! Perspective: ${perspBHandle.uuid.slice(0, 8)}...`)
+
+      // Agent B syncs
+      addLog('Agent B syncing...')
+      await agentB.perspectiveManager.syncPerspective(perspBHandle.uuid)
+      const bLinks1 = await agentB.perspectiveManager.queryLinks(perspBHandle.uuid, {})
+      setAgentBLinks([...bLinks1])
+      addLog(`Agent B sees ${bLinks1.length} link(s) after sync`)
+
+      // Agent B adds a link
+      addLog('Agent B adding link...')
+      await agentB.perspectiveManager.addLink(perspBHandle.uuid, {
+        source: 'ad4m://agentB',
+        target: 'literal://string:Hello from B!',
+        predicate: 'ad4m://message'
+      })
+      const bLinks2 = await agentB.perspectiveManager.queryLinks(perspBHandle.uuid, {})
+      setAgentBLinks([...bLinks2])
+
+      // Agent A syncs
+      addLog('Agent A syncing...')
+      await agentA.perspectiveManager.syncPerspective(perspA.uuid)
+      const aLinks2 = await agentA.perspectiveManager.queryLinks(perspA.uuid, {})
+      setAgentALinks([...aLinks2])
+      addLog(`Agent A sees ${aLinks2.length} link(s) after sync`)
+
+      addLog('✅ Demo complete! Both agents share links.')
+    } catch (e: any) {
+      addLog(`❌ Error: ${e.message}`)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <section class="rounded-lg bg-gray-800 p-6">
+      <h2 class="mb-4 text-xl font-semibold">🔗 Two-Agent Neighbourhood Sync Demo</h2>
+      <p class="mb-4 text-sm text-gray-400">
+        Creates two in-memory executors, publishes a neighbourhood from Agent A, Agent B joins, and both exchange links
+        via a shared link language.
+      </p>
+
+      <button
+        onClick={runDemo}
+        disabled={running()}
+        class="mb-4 rounded bg-teal-600 px-4 py-2 text-sm font-medium hover:bg-teal-500 disabled:opacity-50"
+      >
+        {running() ? 'Running...' : 'Run Two-Agent Sync Demo'}
+      </button>
+
+      <Show when={agentALinks().length > 0 || agentBLinks().length > 0}>
+        <div class="mb-4 grid grid-cols-2 gap-4">
+          <div>
+            <h3 class="mb-2 text-sm font-semibold text-blue-400">Agent A Links ({agentALinks().length})</h3>
+            <div class="space-y-1">
+              <For each={agentALinks()}>
+                {(link) => (
+                  <div class="rounded bg-gray-900 px-2 py-1 font-mono text-xs">
+                    <span class="text-blue-300">{link.data.source}</span>
+                    {' → '}
+                    <span class="text-green-300">{link.data.target}</span>
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+          <div>
+            <h3 class="mb-2 text-sm font-semibold text-purple-400">Agent B Links ({agentBLinks().length})</h3>
+            <div class="space-y-1">
+              <For each={agentBLinks()}>
+                {(link) => (
+                  <div class="rounded bg-gray-900 px-2 py-1 font-mono text-xs">
+                    <span class="text-blue-300">{link.data.source}</span>
+                    {' → '}
+                    <span class="text-green-300">{link.data.target}</span>
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={log().length > 0}>
+        <div class="rounded border border-gray-700 bg-gray-900 p-3">
+          <h3 class="mb-2 text-xs font-semibold text-gray-400">Log</h3>
+          <div class="space-y-0.5">
+            <For each={log()}>{(line) => <p class="font-mono text-xs text-gray-300">{line}</p>}</For>
+          </div>
+        </div>
+      </Show>
+    </section>
   )
 }
 
