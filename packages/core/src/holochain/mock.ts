@@ -61,6 +61,21 @@ export class MockHolochainConductor implements HolochainConductor {
     // No-op in mock
   }
 
+  async createSigningCredentials(_cellId: CellId): Promise<ZomeCallSigner> {
+    const agentPubKey = crypto.getRandomValues(new Uint8Array(39))
+    agentPubKey[0] = 132
+    agentPubKey[1] = 32
+    agentPubKey[2] = 36
+    const capSecret = crypto.getRandomValues(new Uint8Array(64))
+    return {
+      agentPubKey,
+      capSecret,
+      async sign(_data: Uint8Array): Promise<Uint8Array> {
+        return new Uint8Array(64) // mock signature
+      }
+    }
+  }
+
   async callZome(
     _cellId: CellId,
     zomeName: string,

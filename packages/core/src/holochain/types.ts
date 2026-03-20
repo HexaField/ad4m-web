@@ -70,6 +70,11 @@ export interface HolochainConductor {
    * Must be called before callZome for non-author calls.
    */
   grantCapability(cellId: CellId, signer: ZomeCallSigner): Promise<void>
+  /**
+   * Create a new ZomeCallSigner and grant it capability on the given cell.
+   * This generates an ed25519 keypair, grants a transferable cap, and returns a ready-to-use signer.
+   */
+  createSigningCredentials(cellId: CellId): Promise<ZomeCallSigner>
   callZome(cellId: CellId, zomeName: string, fnName: string, payload: unknown, signer: ZomeCallSigner): Promise<unknown>
   onSignal(callback: (signal: HolochainSignal) => void): () => void
   onStateChange(callback: HolochainConnectionListener): () => void

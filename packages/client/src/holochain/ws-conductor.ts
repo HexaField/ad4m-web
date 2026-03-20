@@ -10,6 +10,7 @@ import type {
 } from '@ad4m-web/core'
 import { HolochainConnectionState } from '@ad4m-web/core'
 import { encode, decode } from '@msgpack/msgpack'
+import * as ed from '@noble/ed25519'
 
 export class WebSocketHolochainConductor implements HolochainConductor {
   private adminWs: WebSocket | null = null
@@ -157,6 +158,51 @@ export class WebSocketHolochainConductor implements HolochainConductor {
         }
       }
     })
+  }
+
+  async createSigningCredentials(cellId: CellId): Promise<ZomeCallSigner> {
+    if (!this.adminWs) throw new Error('Not connected')
+
+    const privKey = ed.utils.randomPrivateKey()
+    const pubKeyRaw = await ed.getPublicKeyAsync(privKey)
+
+    // Build a 39-byte HoloHash AgentPubKey: prefix [132, 32, 36] + 32-byte ed25519 pubkey + 4-byte DHT location
+    const locationBytes = cellId.agentPubKey.subarray(35, 39)
+    const agentPubKey = new Uint8Array(39)
+    agentPubKey.set([132, 32, 36], 0)
+    agentPubKey.set(pubKeyRaw, 3)
+    agentPubKey.set(locationBytes, 35)
+
+    // Generate a random cap secret
+    const capSecret = new Uint8Array(64)
+    crypto.getRandomValues(capSecret)
+
+    // Grant capability for this signing key
+    await this.sendAdminRequest({
+      type: 'grant_zome_call_capability',
+      value: {
+        cell_id: [cellId.dnaHash, cellId.agentPubKey],
+        cap_grant: {
+          tag: 'ad4m-web-signing-key',
+          access: {
+            type: 'assigned',
+            value: {
+              secret: capSecret,
+              assignees: [agentPubKey]
+            }
+          },
+          functions: { type: 'all' }
+        }
+      }
+    })
+
+    return {
+      agentPubKey,
+      capSecret,
+      async sign(data: Uint8Array): Promise<Uint8Array> {
+        return ed.signAsync(data, privKey)
+      }
+    }
   }
 
   async callZome(

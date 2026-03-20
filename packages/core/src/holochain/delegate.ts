@@ -6,10 +6,16 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
   private nickToCellId: Map<string, CellId> = new Map()
   private registeredCellIds: Set<string> = new Set()
   private networkSeed?: string
+  private defaultSigner?: ZomeCallSigner
 
   constructor(conductor: HolochainConductor, networkSeed?: string) {
     this.conductor = conductor
     this.networkSeed = networkSeed
+  }
+
+  /** Set a default signer for all zome calls when one isn't provided explicitly. */
+  setDefaultSigner(signer: ZomeCallSigner): void {
+    this.defaultSigner = signer
   }
 
   private cellIdKey(cellId: CellId): string {
@@ -38,8 +44,15 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
             }
             this.nickToCellId.set(dna.nick, cellId)
             this.registeredCellIds.add(this.cellIdKey(cellId))
-            if (signer) {
-              await this.conductor.grantCapability(cellId, signer)
+
+            // Create signing credentials if none provided
+            const effectiveSigner = signer ?? this.defaultSigner
+            if (effectiveSigner) {
+              await this.conductor.grantCapability(cellId, effectiveSigner)
+            } else {
+              // Auto-create signing credentials
+              const autoSigner = await this.conductor.createSigningCredentials(cellId)
+              this.setDefaultSigner(autoSigner)
             }
           }
         }
@@ -64,7 +77,8 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
   ): Promise<unknown> {
     const cellId = this.nickToCellId.get(dnaNick)
     if (!cellId) throw new Error(`Unknown DNA nick: ${dnaNick}`)
-    if (!signer) throw new Error('ZomeCallSigner required')
-    return this.conductor.callZome(cellId, zomeName, fnName, params, signer)
+    const effectiveSigner = signer ?? this.defaultSigner
+    if (!effectiveSigner) throw new Error('ZomeCallSigner required')
+    return this.conductor.callZome(cellId, zomeName, fnName, params, effectiveSigner)
   }
 }
