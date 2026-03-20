@@ -48,7 +48,7 @@ export class NeighbourhoodManager {
     // Wire the link language's sync adapter into the perspective
     const langHandle = this.languageManager.getLanguage(linkLanguageAddress)
     if (langHandle?.language.linksAdapter) {
-      this.perspectiveManager.setLinkLanguage(handle.uuid, langHandle.language.linksAdapter)
+      await this.perspectiveManager.startSync(handle.uuid, langHandle.language.linksAdapter)
     }
     handle.state = PerspectiveState.Synced
 
@@ -90,7 +90,7 @@ export class NeighbourhoodManager {
     // Wire the link language's sync adapter into the perspective
     const langHandle = this.languageManager.getLanguage(linkLanguageAddress)
     if (langHandle?.language.linksAdapter) {
-      this.perspectiveManager.setLinkLanguage(uuid, langHandle.language.linksAdapter)
+      await this.perspectiveManager.startSync(uuid, langHandle.language.linksAdapter)
     }
 
     handle.state = PerspectiveState.Synced

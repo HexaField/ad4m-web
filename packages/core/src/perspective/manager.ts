@@ -3,6 +3,7 @@ import type { Link } from '../agent/types'
 import type { ShaclEngine } from '../shacl/engine'
 import type { AgentService } from '../agent/agent'
 import type { LinkSyncAdapter } from '../language/types'
+import { SyncEngine } from '../neighbourhood/sync-engine'
 import {
   PerspectiveState,
   type PerspectiveHandle,
@@ -27,6 +28,7 @@ export class PerspectiveManager {
   private perspectives = new Map<string, PerspectiveHandle>()
   private listeners = new Set<PerspectiveEventListener>()
   private adapters = new Map<string, LinkSyncAdapter>()
+  private syncEngines = new Map<string, SyncEngine>()
   private linkStore: LinkStore
   private signLink: SignLinkFn
   private pubsub?: PubSub
@@ -279,5 +281,59 @@ export class PerspectiveManager {
         this.emit({ type: 'linkRemoved', uuid, link })
       }
     }
+  }
+
+  // === SyncEngine lifecycle ===
+
+  /**
+   * Start a SyncEngine for a neighbourhood perspective.
+   * Handles initial sync, remote diff callbacks, and state tracking.
+   */
+  async startSync(uuid: string, adapter: LinkSyncAdapter): Promise<void> {
+    this.ensurePerspective(uuid)
+    if (this.syncEngines.has(uuid)) return
+
+    this.setLinkLanguage(uuid, adapter)
+
+    const engine = new SyncEngine({
+      adapter,
+      perspectiveUuid: uuid,
+      onDiff: async (diff) => {
+        if (diff.additions.length > 0) {
+          await this.linkStore.addLinks(uuid, diff.additions)
+          for (const link of diff.additions) {
+            this.emit({ type: 'linkAdded', uuid, link })
+          }
+        }
+        if (diff.removals.length > 0) {
+          for (const link of diff.removals) {
+            await this.linkStore.removeLink(uuid, link)
+            this.emit({ type: 'linkRemoved', uuid, link })
+          }
+        }
+      },
+      onStateChange: (state) => {
+        const handle = this.perspectives.get(uuid)
+        if (handle && state === 'synced') {
+          handle.state = PerspectiveState.Synced
+          this.emit({ type: 'syncStateChange', uuid, state: PerspectiveState.Synced })
+        }
+      }
+    })
+
+    this.syncEngines.set(uuid, engine)
+    await engine.start()
+  }
+
+  async stopSync(uuid: string): Promise<void> {
+    const engine = this.syncEngines.get(uuid)
+    if (engine) {
+      engine.stop()
+      this.syncEngines.delete(uuid)
+    }
+  }
+
+  getSyncEngine(uuid: string): SyncEngine | undefined {
+    return this.syncEngines.get(uuid)
   }
 }
