@@ -22,7 +22,8 @@
   "dependencies": {
     "@noble/ed25519": "^3.0.1",
     "@noble/hashes": "^2.0.1",
-    "@scure/base": "^2.0.0"
+    "@scure/base": "^2.0.0",
+    "graphql": "^16.13.1"
   },
   "devDependencies": {
     "@rollup/plugin-typescript": "^12.3.0",
