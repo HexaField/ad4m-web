@@ -1,10 +1,30 @@
 # Ad4mModel with SPARQL — Implementation Plan
 
+## Vision
+
+**Ad4mModel is the primary developer interface for ad4m-web.** App developers should never need to write raw SPARQL, construct link queries, or interact with the SHACL engine directly. They define models with decorators (`@Model`, `@Property`, `@HasMany`), call `save()`, `findAll()`, `query()`, and everything else is handled underneath.
+
+The stack from the developer's perspective:
+
+```
+App Developer Code
+    ↓
+  Ad4mModel  ←── decorators, query builder, hydration, dirty tracking
+    ↓
+  Perspective  ←── link CRUD, batch operations, subject class registration
+    ↓
+  SPARQL / Oxigraph  ←── query execution, RDF storage
+    ↓
+  Holochain  ←── p2p sync, DHT, neighbourhood
+```
+
+The developer touches the top layer only. Everything below is infrastructure.
+
 ## Context
 
 The reference AD4M uses **SurrealDB** as its link query engine inside perspectives. Ad4mModel (the ORM layer in `@coasys/ad4m`) generates SurrealQL queries for finding, filtering, and hydrating model instances from the link graph.
 
-ad4m-web already has **Oxigraph** (SPARQL/RDF triple store) running in WASM for link storage and SPARQL queries. The task is to implement the `PerspectiveProxy` query interface that Ad4mModel expects — but backed by SPARQL instead of SurrealQL.
+ad4m-web already has **Oxigraph** (SPARQL/RDF triple store) running in WASM for link storage and SPARQL queries. The task is to implement the full Ad4mModel stack — from decorator-driven model definition through SPARQL-backed queries — as the **primary API surface** for application developers.
 
 ## What Ad4mModel Needs
 
@@ -254,6 +274,86 @@ function sparqlLiteralExtract(varName: string): string {
 | `packages/core/src/graphql/schema.ts`          | **Modify** | Wire `perspectiveQuerySPARQL`, subject class resolvers |
 | `packages/core/src/__tests__/model/`           | **New**    | Full test suite for Ad4mModel + SPARQL                 |
 
+## Developer Experience
+
+### What App Developers Write
+
+```typescript
+import { Ad4mModel, Model, Property, HasMany, Optional } from '@ad4m-web/core'
+
+@Model({ name: 'Recipe' })
+class Recipe extends Ad4mModel {
+  @Property({ through: 'recipe://name', resolveLanguage: 'literal' })
+  name: string = ''
+
+  @Optional({ through: 'recipe://description', resolveLanguage: 'literal' })
+  description: string = ''
+
+  @HasMany({ through: 'recipe://ingredient' })
+  ingredients: string[] = []
+
+  @HasMany(() => Comment, { through: 'recipe://comment' })
+  comments: Comment[] = []
+}
+
+// Register the model on a perspective
+await Recipe.register(perspective)
+
+// CRUD
+const recipe = await Recipe.create(perspective, { name: 'Pasta', ingredients: ['flour', 'eggs'] })
+recipe.name = 'Fresh Pasta'
+await recipe.save()
+
+// Queries
+const allRecipes = await Recipe.findAll(perspective)
+const pastaRecipes = await Recipe.findAll(perspective, { where: { name: 'Pasta' } })
+const { results, totalCount } = await Recipe.paginate(perspective, 10, 1)
+
+// Fluent builder
+const topRecipes = await Recipe.query(perspective)
+  .where({ name: { contains: 'Pasta' } })
+  .order({ createdAt: 'DESC' })
+  .limit(5)
+  .run()
+
+// Real-time subscriptions
+await Recipe.query(perspective)
+  .where({ status: 'cooking' })
+  .subscribe((recipes) => console.log('Cooking now:', recipes))
+
+// Transactions
+await Ad4mModel.transaction(perspective, async (tx) => {
+  await Recipe.create(perspective, { name: 'Risotto' }, { batchId: tx.batchId })
+  await oldRecipe.delete(tx.batchId)
+})
+
+// JSON Schema integration (for dynamic/external schemas)
+const ProductModel = Ad4mModel.fromJSONSchema(productSchema, {
+  name: 'Product',
+  namespace: 'product://'
+})
+```
+
+### What Developers Never Need To Touch
+
+- SPARQL queries
+- Link manipulation (`add`, `remove`, `queryLinks`)
+- SHACL shapes and subject class registration (handled by `@Model` decorator + `register()`)
+- RDF triple encoding
+- Oxigraph internals
+- Holochain zome calls
+- Expression signing
+
+### The Perspective Object
+
+Developers get a `Perspective` handle (equivalent to `PerspectiveProxy` in the reference) from:
+
+- Creating one: `const perspective = await executor.createPerspective("My App")`
+- Joining a neighbourhood: `const perspective = await executor.joinNeighbourhood(url)`
+- The GraphQL API
+
+This handle is passed to all Ad4mModel operations. It's the "database connection" equivalent — but it's a shared, synced, p2p data space.
+
 ## Dependency Analysis
 
 From `@coasys/ad4m/model/`:
@@ -283,8 +383,20 @@ Total: ~5,963 lines to port/adapt, ~430 lines to replace with SPARQL equivalents
 - **Link store SPARQL layer**: ~200 lines
 - **GraphQL wiring**: ~100 lines
 - **Batch operations**: ~150 lines
+- **Perspective handle (developer API)**: ~200 lines
 - **Tests**: ~1,500 lines
-- **Total**: ~6,350 lines
+- **Total**: ~6,550 lines
+
+## Implementation Order
+
+The phases in the plan above are ordered by dependency, but from a **developer experience** perspective, the priority is:
+
+1. **Phase 1 + 2** (query builder + RDF storage) — foundation
+2. **Phase 3 + 6 + 7** (hydration + model registration + class name resolution) — makes `Ad4mModel.create/save/findAll` work
+3. **Phase 5** (batch operations) — enables transactions
+4. **Phase 4** (GraphQL wiring) — enables remote/GraphQL access to the same operations
+
+After Phase 3, a developer can `@Model` → `register()` → `create()` → `findAll()` → `save()` → `delete()`. That's the MVP.
 
 ## Open Questions
 
@@ -292,3 +404,4 @@ Total: ~5,963 lines to port/adapt, ~430 lines to replace with SPARQL equivalents
 2. **Literal URI handling in SPARQL** — AD4M uses `literal://string:X` as URIs. In SPARQL these are IRIs, not RDF literals. String manipulation via `SUBSTR`/`STRSTARTS` works but is verbose. Alternative: store a parallel `xsd:string` literal for each link target.
 3. **PerspectiveProxy compatibility** — Ad4mModel is tightly coupled to `PerspectiveProxy` from `@coasys/ad4m`. We need to either: (a) implement the same interface, or (b) adapt Ad4mModel to use our own perspective interface. Option (b) is cleaner for ad4m-web.
 4. **Batch semantics** — Does `createBatch/commitBatch` need true ACID? Or is buffered-apply sufficient? (Buffered-apply is likely fine for single-user browser contexts.)
+5. **Decorator implementation** — The reference uses `reflect-metadata`. We should verify whether TC39 decorators (Stage 3) work with our TS config, or if we need the legacy transform.
