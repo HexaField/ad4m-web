@@ -70,6 +70,12 @@ export class InMemoryLinkStore implements LinkStore {
     this.store.delete(perspectiveUuid)
   }
 
+  async querySparql(_perspectiveUuid: string, _sparql: string): Promise<any> {
+    throw new Error(
+      'SPARQL queries require Oxigraph. Use queryLinks() for basic queries or install @ad4m-web/client with Oxigraph WASM.'
+    )
+  }
+
   async dump(): Promise<string> {
     const obj: Record<string, LinkExpression[]> = {}
     for (const [k, v] of this.store) {

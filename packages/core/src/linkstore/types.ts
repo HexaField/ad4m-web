@@ -39,6 +39,9 @@ export interface LinkStore {
   queryLinks(perspectiveUuid: string, query: LinkQuery): Promise<LinkExpression[]>
   allLinks(perspectiveUuid: string): Promise<LinkExpression[]>
   removePerspective(perspectiveUuid: string): Promise<void>
+  /** Execute a SPARQL query against the perspective's link graph.
+   * Core InMemoryLinkStore throws — implementations with Oxigraph (e.g. browser client) override this. */
+  querySparql(perspectiveUuid: string, sparql: string): Promise<any>
   dump(): Promise<string>
   load(data: string): Promise<void>
 }
