@@ -36,9 +36,12 @@ class MockWebSocket {
   }
 
   // Test helper: simulate incoming message
-  simulateMessage(data: ArrayBuffer) {
+  simulateMessage(data: Uint8Array) {
+    // Create a properly-sized ArrayBuffer (msgpack encode may return a view into a larger buffer)
+    const buf = new ArrayBuffer(data.byteLength)
+    new Uint8Array(buf).set(data)
     const handlers = this.listeners.get('message') ?? []
-    for (const h of handlers) h({ data })
+    for (const h of handlers) h({ data: buf })
   }
 }
 
@@ -147,7 +150,7 @@ describe('WebSocketHolochainConductor', () => {
     // Send a response back
     const responsePayload = encode({ result: 'ok' })
     const responseMsg = encode({ type: 'Response', id: 0, data: responsePayload })
-    appWs.simulateMessage((responseMsg as Uint8Array).buffer)
+    appWs.simulateMessage(responseMsg as Uint8Array)
 
     const result = await callPromise
     expect(result).toEqual({ result: 'ok' })
@@ -184,7 +187,7 @@ describe('WebSocketHolochainConductor', () => {
       payload: signalPayload
     })
     const signalMsg = encode({ type: 'Signal', data: signalData })
-    appWs.simulateMessage((signalMsg as Uint8Array).buffer)
+    appWs.simulateMessage(signalMsg as Uint8Array)
 
     // Wait for async message processing
     await new Promise((r) => setTimeout(r, 10))
@@ -209,7 +212,7 @@ describe('WebSocketHolochainConductor', () => {
     const appWs = MockWebSocket.instances[1]
     const signalData = encode({ cell_id: [new Uint8Array([1]), new Uint8Array([2])], payload: {} })
     const signalMsg = encode({ type: 'Signal', data: signalData })
-    appWs.simulateMessage((signalMsg as Uint8Array).buffer)
+    appWs.simulateMessage(signalMsg as Uint8Array)
 
     await new Promise((r) => setTimeout(r, 10))
     expect(signals).toHaveLength(0)
