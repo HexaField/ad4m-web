@@ -1,5 +1,6 @@
-import { createExecutor, GraphQLEngine } from '@ad4m-web/core'
+import { createExecutor, GraphQLEngine, InMemoryBundleResolver, InProcessBundleExecutor } from '@ad4m-web/core'
 import { BrowserWalletStore } from '../persistence/idb-wallet'
+import { WebWorkerBundleExecutor } from '../language/worker-executor'
 import type { Executor } from '@ad4m-web/core'
 
 export interface ExecutorState {
@@ -9,6 +10,8 @@ export interface ExecutorState {
 
 export async function bootstrapExecutor(): Promise<ExecutorState> {
   const walletStore = new BrowserWalletStore()
+  const bundleResolver = new InMemoryBundleResolver()
+  const bundleExecutor = new WebWorkerBundleExecutor()
 
   const result = await createExecutor({
     bootstrapConfig: {
@@ -19,7 +22,9 @@ export async function bootstrapExecutor(): Promise<ExecutorState> {
         perspectiveLanguageAddress: 'system-perspective-language'
       }
     },
-    walletStore
+    walletStore,
+    bundleResolver,
+    bundleExecutor
   })
 
   const graphql = new GraphQLEngine(result.executor)

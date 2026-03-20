@@ -1,3 +1,6 @@
 export * from './types'
 export { InProcessLanguageHost } from './host'
 export { LanguageManager } from './manager'
+export * from './bundle'
+export { InProcessBundleExecutor } from './bundle-executor'
+export { ContentStoreBundleResolver, InMemoryBundleResolver } from './bundle-resolver'

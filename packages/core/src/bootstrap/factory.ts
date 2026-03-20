@@ -1,6 +1,7 @@
 import type { BootstrapConfig } from './types'
 import type { CryptoProvider, WalletStore } from '../agent/types'
 import type { HolochainConductor } from '../holochain/types'
+import type { BundleResolver, BundleExecutor } from '../language/bundle'
 import { NobleCryptoProvider } from '../agent/crypto'
 import { AgentService } from '../agent/agent'
 import { InMemoryLinkStore } from '../linkstore/store'
@@ -19,6 +20,8 @@ export interface CreateExecutorConfig {
   cryptoProvider?: CryptoProvider
   holochainConductor?: HolochainConductor
   persistenceConfig?: PersistenceConfig
+  bundleResolver?: BundleResolver
+  bundleExecutor?: BundleExecutor
 }
 
 export interface CreateExecutorResult {
@@ -34,6 +37,13 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Crea
   const languageHost = new InProcessLanguageHost()
   const languageManager = new LanguageManager(languageHost)
   const perspectiveManager = new PerspectiveManager(linkStore, shaclEngine, agentService)
+
+  if (config.bundleResolver) {
+    languageManager.setBundleResolver(config.bundleResolver)
+  }
+  if (config.bundleExecutor) {
+    languageManager.setBundleExecutor(config.bundleExecutor)
+  }
 
   const holochainDelegate = config.holochainConductor
     ? new HolochainLanguageDelegateImpl(config.holochainConductor)

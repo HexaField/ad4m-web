@@ -12,10 +12,114 @@ export default function ExecutorUI(props: Props) {
   return (
     <div class="space-y-8">
       <AgentPanel executor={props.executor} />
+      <LanguagesPanel executor={props.executor} />
       <HolochainPanel />
       <PerspectivesPanel executor={props.executor} />
       <GraphQLConsole graphql={props.graphql} />
     </div>
+  )
+}
+
+const ECHO_LANGUAGE_BUNDLE = `
+  module.exports = {
+    create: function(context) {
+      return {
+        name: 'echo-language',
+        expressionAdapter: {
+          get: async function(address) {
+            return { data: 'echo:' + address, author: context.agent.did, timestamp: new Date().toISOString(), proof: { key: '', signature: '' } };
+          },
+          putAdapter: {
+            createPublic: async function(content) {
+              return 'echo-' + JSON.stringify(content);
+            }
+          }
+        },
+        interactions: function() { return []; }
+      };
+    }
+  };
+`
+
+function LanguagesPanel(props: { executor: Executor }) {
+  const lm = () => props.executor.languageManager
+  const [languages, setLanguages] = createSignal(lm().getAllInstalled())
+  const [installAddr, setInstallAddr] = createSignal('')
+  const [error, setError] = createSignal('')
+
+  const refresh = () => setLanguages(lm().getAllInstalled())
+
+  const loadDemo = async () => {
+    try {
+      setError('')
+      const status = props.executor.agentService.getStatus()
+      const ctx = {
+        agent: { did: status.did || 'did:unknown', createSignedExpression: async (d: any) => d },
+        signatures: { verify: async () => true },
+        storageDirectory: '',
+        customSettings: {},
+        ad4mSignal: () => {}
+      }
+      lm().setLanguageContext(ctx as any)
+      await lm().install(
+        'demo-echo',
+        { address: 'demo-echo', name: 'Echo Language (Demo)', author: 'system' },
+        ECHO_LANGUAGE_BUNDLE
+      )
+      refresh()
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  const capabilities = (address: string) => {
+    const handle = lm().getLanguage(address)
+    if (!handle) return []
+    const caps: string[] = []
+    if (handle.language.expressionAdapter) caps.push('expression')
+    if (handle.language.linksAdapter) caps.push('linkSync')
+    if (handle.language.telepresenceAdapter) caps.push('telepresence')
+    if (handle.language.languageAdapter) caps.push('languageAdapter')
+    if (handle.language.directMessageAdapter) caps.push('directMessage')
+    return caps
+  }
+
+  return (
+    <section class="rounded-lg bg-gray-800 p-6">
+      <h2 class="mb-4 text-xl font-semibold">Languages</h2>
+
+      <Show when={error()}>
+        <p class="mb-2 text-sm text-red-400">{error()}</p>
+      </Show>
+
+      <div class="mb-4 flex gap-2">
+        <button onClick={loadDemo} class="rounded bg-purple-600 px-4 py-1.5 text-sm font-medium hover:bg-purple-500">
+          Load Demo Language
+        </button>
+      </div>
+
+      <Show when={languages().length === 0}>
+        <p class="text-sm text-gray-500">No languages installed.</p>
+      </Show>
+
+      <div class="space-y-2">
+        <For each={languages()}>
+          {(meta) => (
+            <div class="rounded border border-gray-700 px-3 py-2">
+              <p class="text-sm font-medium">{meta.name}</p>
+              <p class="font-mono text-xs text-gray-500">{meta.address}</p>
+              <Show when={capabilities(meta.address).length > 0}>
+                <div class="mt-1 flex gap-1">
+                  <For each={capabilities(meta.address)}>
+                    {(cap) => <span class="rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300">{cap}</span>}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
   )
 }
 
