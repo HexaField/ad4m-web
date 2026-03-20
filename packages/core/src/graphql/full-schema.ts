@@ -2,13 +2,14 @@ import { createSchema } from './schema'
 import { PubSub, createAsyncIterator } from './subscriptions'
 import { GraphQLObjectType, GraphQLString, GraphQLNonNull, GraphQLSchema } from 'graphql'
 import type { Executor } from '../bootstrap/executor'
+import type { CapabilityService } from './capability-service'
 
 /**
  * Creates a full GraphQL schema with Query, Mutation, and Subscription types.
  * Wraps the base schema from schema.ts and adds subscription support.
  */
-export function createFullSchema(executor: Executor, pubsub: PubSub): GraphQLSchema {
-  const baseSchema = createSchema(executor)
+export function createFullSchema(executor: Executor, pubsub: PubSub, capabilityService?: CapabilityService): GraphQLSchema {
+  const baseSchema = createSchema(executor, capabilityService)
 
   const queryType = baseSchema.getQueryType()!
   const mutationType = baseSchema.getMutationType()!

@@ -11,6 +11,7 @@ import {
 import type { Executor } from '../bootstrap/executor'
 import type { Link } from '../agent/types'
 import type { LinkExpression } from '../linkstore/types'
+import type { CapabilityService } from './capability-service'
 
 // === Output Types ===
 
@@ -130,6 +131,64 @@ const LanguageRefType = new GraphQLObjectType({
   }
 })
 
+const CapabilityType = new GraphQLObjectType({
+  name: 'Capability',
+  fields: {
+    with: {
+      type: new GraphQLNonNull(
+        new GraphQLObjectType({
+          name: 'CapabilityResource',
+          fields: {
+            domain: { type: new GraphQLNonNull(GraphQLString) },
+            pointers: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) }
+          }
+        })
+      )
+    },
+    can: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) }
+  }
+})
+
+const AuthInfoType = new GraphQLObjectType({
+  name: 'AuthInfo',
+  fields: {
+    appName: { type: new GraphQLNonNull(GraphQLString) },
+    appDesc: { type: new GraphQLNonNull(GraphQLString) },
+    appDomain: { type: GraphQLString },
+    appUrl: { type: GraphQLString },
+    capabilities: { type: new GraphQLList(new GraphQLNonNull(CapabilityType)) }
+  }
+})
+
+const CapabilityInputType = new GraphQLInputObjectType({
+  name: 'CapabilityInput',
+  fields: {
+    with: {
+      type: new GraphQLNonNull(
+        new GraphQLInputObjectType({
+          name: 'CapabilityResourceInput',
+          fields: {
+            domain: { type: new GraphQLNonNull(GraphQLString) },
+            pointers: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) }
+          }
+        })
+      )
+    },
+    can: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) }
+  }
+})
+
+const AuthInfoInputType = new GraphQLInputObjectType({
+  name: 'AuthInfoInput',
+  fields: {
+    appName: { type: new GraphQLNonNull(GraphQLString) },
+    appDesc: { type: new GraphQLNonNull(GraphQLString) },
+    appDomain: { type: GraphQLString },
+    appUrl: { type: GraphQLString },
+    capabilities: { type: new GraphQLList(new GraphQLNonNull(CapabilityInputType)) }
+  }
+})
+
 function serializeAgentStatus(status: ReturnType<Executor['agentService']['getStatus']>) {
   return {
     ...status,
@@ -145,7 +204,7 @@ function normalizeLinkData(data: any): Link {
   }
 }
 
-export function createSchema(executor: Executor): GraphQLSchema {
+export function createSchema(executor: Executor, capabilityService?: CapabilityService): GraphQLSchema {
   const queryType = new GraphQLObjectType({
     name: 'Query',
     fields: {
@@ -185,6 +244,13 @@ export function createSchema(executor: Executor): GraphQLSchema {
             isInitialized: status.isInitialized,
             isUnlocked: status.isUnlocked
           }
+        }
+      },
+      agentGetApps: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(AuthInfoType))),
+        resolve: () => {
+          if (!capabilityService) throw new Error('CapabilityService not available')
+          return capabilityService.getApps()
         }
       }
     }
@@ -327,6 +393,33 @@ export function createSchema(executor: Executor): GraphQLSchema {
             args.templateData
           )
           return { address: result.address, name: result.meta.name }
+        }
+      },
+      agentRequestCapability: {
+        type: new GraphQLNonNull(GraphQLString),
+        args: { authInfo: { type: new GraphQLNonNull(AuthInfoInputType) } },
+        resolve: (_: unknown, args: { authInfo: any }) => {
+          if (!capabilityService) throw new Error('CapabilityService not available')
+          return capabilityService.requestCapability(args.authInfo)
+        }
+      },
+      agentGenerateJwt: {
+        type: new GraphQLNonNull(GraphQLString),
+        args: {
+          requestId: { type: new GraphQLNonNull(GraphQLString) },
+          rand: { type: new GraphQLNonNull(GraphQLString) }
+        },
+        resolve: async (_: unknown, args: { requestId: string; rand: string }) => {
+          if (!capabilityService) throw new Error('CapabilityService not available')
+          return capabilityService.generateJwt(args.requestId, args.rand)
+        }
+      },
+      agentRevokeToken: {
+        type: new GraphQLNonNull(GraphQLBoolean),
+        args: { requestId: { type: new GraphQLNonNull(GraphQLString) } },
+        resolve: (_: unknown, args: { requestId: string }) => {
+          if (!capabilityService) throw new Error('CapabilityService not available')
+          return capabilityService.revokeToken(args.requestId)
         }
       }
     }
