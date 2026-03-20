@@ -10,6 +10,7 @@ import {
   type PerspectiveEventListener,
   type LinkMutations
 } from './types'
+import type { PubSub } from '../graphql/subscriptions'
 
 export type SignLinkFn = (link: Link) => Promise<LinkExpression>
 
@@ -28,15 +29,43 @@ export class PerspectiveManager {
   private adapters = new Map<string, LinkSyncAdapter>()
   private linkStore: LinkStore
   private signLink: SignLinkFn
+  private pubsub?: PubSub
 
-  constructor(linkStore: LinkStore, _shaclEngine: ShaclEngine, _agentService: AgentService, signLink?: SignLinkFn) {
+  constructor(
+    linkStore: LinkStore,
+    _shaclEngine: ShaclEngine,
+    _agentService: AgentService,
+    signLink?: SignLinkFn,
+    pubsub?: PubSub
+  ) {
     this.linkStore = linkStore
     this.signLink = signLink ?? defaultSign
+    this.pubsub = pubsub
   }
 
   private emit(event: PerspectiveEvent): void {
     for (const listener of this.listeners) {
       listener(event)
+    }
+    // Publish to PubSub for GraphQL subscriptions
+    if (this.pubsub) {
+      switch (event.type) {
+        case 'perspectiveAdded':
+          this.pubsub.publish('perspectiveAdded', event.handle)
+          break
+        case 'perspectiveUpdated':
+          this.pubsub.publish('perspectiveUpdated', event.handle)
+          break
+        case 'perspectiveRemoved':
+          this.pubsub.publish('perspectiveRemoved', event.uuid)
+          break
+        case 'linkAdded':
+          this.pubsub.publish('perspectiveLinkAdded', { uuid: event.uuid, link: event.link })
+          break
+        case 'linkRemoved':
+          this.pubsub.publish('perspectiveLinkRemoved', { uuid: event.uuid, link: event.link })
+          break
+      }
     }
   }
 

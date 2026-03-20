@@ -1,5 +1,4 @@
 export { GraphQLEngine } from './engine'
-export { FullGraphQLEngine } from './engine-with-subs'
 export { createSchema } from './schema'
 export { createFullSchema } from './full-schema'
 export { PubSub, createAsyncIterator } from './subscriptions'

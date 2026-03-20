@@ -17,6 +17,7 @@ import { InMemoryContentStore } from './content-store'
 import { Executor } from './executor'
 import type { PersistenceConfig } from '../persistence/types'
 import { PersistenceCoordinator } from '../persistence/coordinator'
+import { PubSub } from '../graphql/subscriptions'
 
 export interface CreateExecutorConfig {
   bootstrapConfig: BootstrapConfig
@@ -35,7 +36,8 @@ export interface CreateExecutorResult {
 
 export async function createExecutor(config: CreateExecutorConfig): Promise<CreateExecutorResult> {
   const crypto = config.cryptoProvider ?? new NobleCryptoProvider()
-  const agentService = new AgentService(crypto, config.walletStore)
+  const pubsub = new PubSub()
+  const agentService = new AgentService(crypto, config.walletStore, pubsub)
   const linkStore = new InMemoryLinkStore()
   const shaclEngine = new ShaclEngine(linkStore)
   const languageHost = new InProcessLanguageHost()
@@ -57,7 +59,7 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Crea
     }
   }
 
-  const perspectiveManager = new PerspectiveManager(linkStore, shaclEngine, agentService, signLink)
+  const perspectiveManager = new PerspectiveManager(linkStore, shaclEngine, agentService, signLink, pubsub)
 
   if (config.bundleResolver) {
     languageManager.setBundleResolver(config.bundleResolver)
@@ -109,7 +111,8 @@ export async function createExecutor(config: CreateExecutorConfig): Promise<Crea
     linkStore,
     holochainDelegate,
     bootstrapConfig: config.bootstrapConfig,
-    neighbourhoodManager
+    neighbourhoodManager,
+    pubsub
   })
 
   let persistence: PersistenceCoordinator | undefined

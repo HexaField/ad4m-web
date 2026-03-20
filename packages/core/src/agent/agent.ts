@@ -1,6 +1,7 @@
 import { publicKeyToDid, generateDidDocument } from './did'
 import { signExpression, verifyExpression } from './signing'
 import type { AgentStatus, CryptoProvider, DecoratedExpressionProof, Expression, WalletStore } from './types'
+import type { PubSub } from '../graphql/subscriptions'
 
 type AgentState = 'Uninitialized' | 'Locked' | 'Unlocked'
 
@@ -14,10 +15,12 @@ export class AgentService {
 
   private crypto: CryptoProvider
   private walletStore: WalletStore
+  private pubsub?: PubSub
 
-  constructor(crypto: CryptoProvider, walletStore: WalletStore) {
+  constructor(crypto: CryptoProvider, walletStore: WalletStore, pubsub?: PubSub) {
     this.crypto = crypto
     this.walletStore = walletStore
+    this.pubsub = pubsub
   }
 
   getStatus(): AgentStatus {
@@ -40,6 +43,7 @@ export class AgentService {
     })
 
     this.state = 'Unlocked'
+    this.pubsub?.publish('agentStatusChanged', this.getStatus())
   }
 
   lock(): void {
@@ -48,6 +52,7 @@ export class AgentService {
     }
     this.privateKey = undefined
     this.state = 'Locked'
+    this.pubsub?.publish('agentStatusChanged', this.getStatus())
   }
 
   async unlock(passphrase: string): Promise<void> {
@@ -59,6 +64,7 @@ export class AgentService {
     this.did = publicKeyToDid(wallet.mainKey.publicKey)
     this.didDocument = generateDidDocument(this.did)
     this.state = 'Unlocked'
+    this.pubsub?.publish('agentStatusChanged', this.getStatus())
   }
 
   async createSignedExpression(data: unknown): Promise<Expression<unknown>> {

@@ -6,6 +6,8 @@ import type { HolochainLanguageDelegate } from '../language/types'
 import type { PerspectiveManager } from '../perspective/manager'
 import type { NeighbourhoodManager } from '../neighbourhood/manager'
 
+import type { PubSub } from '../graphql/subscriptions'
+
 export interface ExecutorDeps {
   agentService: AgentServiceInterface
   perspectiveManager: PerspectiveManager
@@ -15,6 +17,7 @@ export interface ExecutorDeps {
   holochainDelegate?: HolochainLanguageDelegate
   bootstrapConfig: BootstrapConfig
   neighbourhoodManager?: NeighbourhoodManager
+  pubsub?: PubSub
 }
 
 export class Executor implements ExecutorInterface {
@@ -26,6 +29,7 @@ export class Executor implements ExecutorInterface {
   readonly holochainDelegate?: HolochainLanguageDelegate
   readonly bootstrapConfig: BootstrapConfig
   readonly neighbourhoodManager?: NeighbourhoodManager
+  readonly pubsub?: PubSub
   private _isReady = false
 
   constructor(deps: ExecutorDeps) {
@@ -37,6 +41,7 @@ export class Executor implements ExecutorInterface {
     this.holochainDelegate = deps.holochainDelegate
     this.bootstrapConfig = deps.bootstrapConfig
     this.neighbourhoodManager = deps.neighbourhoodManager
+    this.pubsub = deps.pubsub
   }
 
   get isReady(): boolean {
@@ -49,9 +54,19 @@ export class Executor implements ExecutorInterface {
       throw new Error('Agent must be initialized before executor can start. Call AgentService.generate() first.')
     }
 
-    // System language addresses stored for future loading
-    // Actual language bundle loading is deferred to integration phase
-    void this.bootstrapConfig.languages
+    // Load bootstrap languages if a language manager with bundle support is available
+    const languages = this.bootstrapConfig.languages
+    if (languages && this.languageManager) {
+      for (const [name, address] of Object.entries(languages)) {
+        try {
+          await this.languageManager.install(address)
+        } catch (err) {
+          // Bootstrap language loading is best-effort — languages may not be available yet
+          // (e.g., no network, no bundle resolver configured)
+          console.warn(`Failed to load bootstrap language "${name}" (${address}):`, err)
+        }
+      }
+    }
 
     this._isReady = true
   }
