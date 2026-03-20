@@ -5,9 +5,11 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
   private conductor: HolochainConductor
   private nickToCellId: Map<string, CellId> = new Map()
   private registeredCellIds: Set<string> = new Set()
+  private networkSeed?: string
 
-  constructor(conductor: HolochainConductor) {
+  constructor(conductor: HolochainConductor, networkSeed?: string) {
     this.conductor = conductor
+    this.networkSeed = networkSeed
   }
 
   private cellIdKey(cellId: CellId): string {
@@ -24,7 +26,8 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
       const appInfo = await this.conductor.installApp({
         installedAppId: `app-${dna.nick}-${Date.now()}`,
         agentKey,
-        happBytes: dna.file
+        happBytes: dna.file,
+        networkSeed: this.networkSeed
       })
       for (const cells of Object.values(appInfo.cellInfo)) {
         for (const cell of cells) {
