@@ -1,0 +1,12 @@
+environment_path: ./.holochain-data
+keystore:
+  type: lair_server_in_proc
+admin_interfaces:
+  - driver:
+      type: websocket
+      port: 1234
+      allowed_origins: "*"
+network:
+  transport_pool:
+    - type: webrtc
+  bootstrap_service: https://bootstrap.ad4m.dev:4433
