@@ -1,5 +1,7 @@
 import { createSignal, For, Show } from 'solid-js'
 import type { Executor, GraphQLEngine } from '@ad4m-web/core'
+import { HolochainConnectionState } from '@ad4m-web/core'
+import { WebSocketHolochainConductor } from '../holochain/ws-conductor'
 
 interface Props {
   executor: Executor
@@ -10,9 +12,106 @@ export default function ExecutorUI(props: Props) {
   return (
     <div class="space-y-8">
       <AgentPanel executor={props.executor} />
+      <HolochainPanel />
       <PerspectivesPanel executor={props.executor} />
       <GraphQLConsole graphql={props.graphql} />
     </div>
+  )
+}
+
+function HolochainPanel() {
+  const [adminUrl, setAdminUrl] = createSignal('ws://localhost:4444')
+  const [appUrl, setAppUrl] = createSignal('ws://localhost:8888')
+  const [connState, setConnState] = createSignal<HolochainConnectionState>(HolochainConnectionState.Disconnected)
+  const [error, setError] = createSignal('')
+  const [conductor, setConductor] = createSignal<WebSocketHolochainConductor | null>(null)
+
+  const stateColor = () => {
+    switch (connState()) {
+      case HolochainConnectionState.Connected:
+        return 'text-green-400'
+      case HolochainConnectionState.Connecting:
+        return 'text-yellow-400'
+      case HolochainConnectionState.Error:
+        return 'text-red-400'
+      default:
+        return 'text-gray-400'
+    }
+  }
+
+  const connect = async () => {
+    try {
+      setError('')
+      const c = new WebSocketHolochainConductor()
+      c.onStateChange((s) => setConnState(s))
+      await c.connect({ conductorAdminUrl: adminUrl(), conductorAppUrl: appUrl() })
+      setConductor(c)
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  const disconnect = async () => {
+    try {
+      setError('')
+      await conductor()?.disconnect()
+      setConductor(null)
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  return (
+    <section class="rounded-lg bg-gray-800 p-6">
+      <h2 class="mb-4 text-xl font-semibold">Holochain</h2>
+      <p class="mb-2">
+        Status: <span class={`font-mono font-bold ${stateColor()}`}>{connState()}</span>
+      </p>
+
+      <Show when={connState() === HolochainConnectionState.Connected}>
+        <p class="mb-2 text-sm text-gray-400">Connected to {appUrl()}</p>
+      </Show>
+
+      <Show when={error()}>
+        <p class="mb-2 text-sm text-red-400">{error()}</p>
+      </Show>
+
+      <div class="mt-3 space-y-2">
+        <input
+          placeholder="Admin URL"
+          value={adminUrl()}
+          onInput={(e) => setAdminUrl(e.currentTarget.value)}
+          disabled={connState() === HolochainConnectionState.Connected}
+          class="w-full rounded border border-gray-600 bg-gray-700 px-3 py-1.5 text-sm"
+        />
+        <input
+          placeholder="App URL"
+          value={appUrl()}
+          onInput={(e) => setAppUrl(e.currentTarget.value)}
+          disabled={connState() === HolochainConnectionState.Connected}
+          class="w-full rounded border border-gray-600 bg-gray-700 px-3 py-1.5 text-sm"
+        />
+        <div class="flex gap-2">
+          <Show when={connState() !== HolochainConnectionState.Connected}>
+            <button
+              onClick={connect}
+              disabled={connState() === HolochainConnectionState.Connecting}
+              class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+            >
+              Connect
+            </button>
+          </Show>
+          <Show when={connState() === HolochainConnectionState.Connected}>
+            <button
+              onClick={disconnect}
+              class="rounded bg-orange-600 px-4 py-1.5 text-sm font-medium hover:bg-orange-500"
+            >
+              Disconnect
+            </button>
+          </Show>
+        </div>
+      </div>
+    </section>
   )
 }
 
