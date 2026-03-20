@@ -5,7 +5,8 @@ import type {
   InstalledAppInfo,
   InstallAppRequest,
   HolochainSignal,
-  HolochainConnectionListener
+  HolochainConnectionListener,
+  ZomeCallSigner
 } from '@ad4m-web/core'
 import { HolochainConnectionState } from '@ad4m-web/core'
 import { encode, decode } from '@msgpack/msgpack'
@@ -39,9 +40,7 @@ export class WebSocketHolochainConductor implements HolochainConductor {
     this.appWs?.close()
     this.adminWs = null
     this.appWs = null
-    for (const [, p] of this.pending) {
-      p.reject(new Error('Disconnected'))
-    }
+    for (const [, p] of this.pending) p.reject(new Error('Disconnected'))
     this.pending.clear()
     this.setState(HolochainConnectionState.Disconnected)
   }
@@ -59,9 +58,10 @@ export class WebSocketHolochainConductor implements HolochainConductor {
   async installApp(request: InstallAppRequest): Promise<InstalledAppInfo> {
     if (!this.adminWs) throw new Error('Not connected')
 
-    const source = request.happPath ? { path: request.happPath } : { bundle: request.happBytes }
+    const source = request.happPath
+      ? { type: 'path', value: request.happPath }
+      : { type: 'bytes', value: request.happBytes }
 
-    // Install
     const installResponse = (await this.sendAdminRequest({
       type: 'install_app',
       value: {
@@ -72,17 +72,18 @@ export class WebSocketHolochainConductor implements HolochainConductor {
         roles_settings: null,
         ignore_genesis_failure: false
       }
-    })) as { type: string; value: { installed_app_id: string; cell_info: Record<string, unknown[]> } }
+    })) as {
+      type: string
+      value: { installed_app_id: string; cell_info: Record<string, { type: string; value: any }[]> }
+    }
 
     const appId = installResponse.value.installed_app_id
 
-    // Enable
     await this.sendAdminRequest({
       type: 'enable_app',
       value: { installed_app_id: appId }
     })
 
-    // Attach app interface
     const attachResponse = (await this.sendAdminRequest({
       type: 'attach_app_interface',
       value: { port: 0, allowed_origins: '*', installed_app_id: appId }
@@ -90,7 +91,6 @@ export class WebSocketHolochainConductor implements HolochainConductor {
 
     const appPort = attachResponse.value.port
 
-    // Issue auth token
     const tokenResponse = (await this.sendAdminRequest({
       type: 'issue_app_authentication_token',
       value: { installed_app_id: appId, single_use: false, expiry_seconds: 0 }
@@ -98,37 +98,31 @@ export class WebSocketHolochainConductor implements HolochainConductor {
 
     const token = tokenResponse.value.token
 
-    // Connect to app interface
     const baseUrl = this.adminUrl.replace(/:\d+/, `:${appPort}`)
     this.appWs = await this.connectWs(baseUrl)
     this.setupMessageHandler(this.appWs)
 
-    // Authenticate
     const authData = encode({ token })
     const authMsg = encode({ type: 'authenticate', data: authData })
     this.appWs.send(authMsg)
 
-    // Parse cell_info
     const cellInfo: Record<
       string,
       { provisioned: { cellId: [Uint8Array, Uint8Array]; dnaModifiers: Record<string, unknown>; name: string } }[]
     > = {}
-    const rawCellInfo = installResponse.value.cell_info as Record<string, unknown[]>
+    const rawCellInfo = installResponse.value.cell_info
     for (const [role, cells] of Object.entries(rawCellInfo)) {
       cellInfo[role] = (
-        cells as {
-          provisioned: { cell_id: [Uint8Array, Uint8Array]; dna_modifiers: Record<string, unknown>; name: string }
-        }[]
+        cells as { type: string; value: { cell_id: [Uint8Array, Uint8Array]; dna_modifiers: any; name: string } }[]
       ).map((c) => ({
         provisioned: {
-          cellId: c.provisioned.cell_id,
-          dnaModifiers: c.provisioned.dna_modifiers,
-          name: c.provisioned.name
+          cellId: c.value.cell_id,
+          dnaModifiers: c.value.dna_modifiers,
+          name: c.value.name
         }
       }))
     }
 
-    // Determine agent key from first cell
     let agentKey = new Uint8Array(0)
     for (const cells of Object.values(cellInfo)) {
       if (cells.length > 0) {
@@ -144,40 +138,74 @@ export class WebSocketHolochainConductor implements HolochainConductor {
     }
   }
 
-  async callZome(cellId: CellId, zomeName: string, fnName: string, payload: unknown): Promise<unknown> {
+  async grantCapability(cellId: CellId, signer: ZomeCallSigner): Promise<void> {
+    if (!this.adminWs) throw new Error('Not connected')
+    await this.sendAdminRequest({
+      type: 'grant_zome_call_capability',
+      value: {
+        cell_id: [cellId.dnaHash, cellId.agentPubKey],
+        cap_grant: {
+          tag: 'ad4m-web',
+          access: {
+            type: 'assigned',
+            value: {
+              secret: signer.capSecret,
+              assignees: [signer.agentPubKey]
+            }
+          },
+          functions: { type: 'all' }
+        }
+      }
+    })
+  }
+
+  async callZome(
+    cellId: CellId,
+    zomeName: string,
+    fnName: string,
+    payload: unknown,
+    signer: ZomeCallSigner
+  ): Promise<unknown> {
     if (!this.appWs) throw new Error('Not connected to app interface')
 
     const nonce = new Uint8Array(32)
     crypto.getRandomValues(nonce)
-    const expiresAt = BigInt((Date.now() + 300000) * 1000) // 5 min from now in microseconds
+    const expiresAt = (Date.now() + 300000) * 1000
 
-    const innerPayload = encode({
+    const zomeCallParams = {
+      provenance: signer.agentPubKey,
+      cell_id: [cellId.dnaHash, cellId.agentPubKey],
+      zome_name: zomeName,
+      fn_name: fnName,
+      cap_secret: signer.capSecret,
+      payload: encode(payload),
+      nonce,
+      expires_at: expiresAt
+    }
+
+    const paramsBytes = encode(zomeCallParams)
+    const hashBuf = await crypto.subtle.digest('SHA-512', paramsBytes)
+    const signature = await signer.sign(new Uint8Array(hashBuf))
+
+    const response = await this.sendAppRequest({
       type: 'call_zome',
       value: {
-        cell_id: [cellId.dnaHash, cellId.agentPubKey],
-        zome_name: zomeName,
-        fn_name: fnName,
-        payload: encode(payload),
-        provenance: cellId.agentPubKey,
-        nonce,
-        expires_at: expiresAt
+        bytes: paramsBytes,
+        signature
       }
     })
 
-    const id = this.requestId++
-    const msg = encode({ type: 'request', id, data: innerPayload })
+    if (!response || typeof response !== 'object') return response
+    const typed = response as { type?: string; value?: unknown }
+    if (typed.type === 'zome_called' && typed.value instanceof Uint8Array) {
+      try {
+        return decode(typed.value)
+      } catch {
+        return typed.value
+      }
+    }
 
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
-      this.appWs!.send(msg)
-
-      setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id)
-          reject(new Error(`Request callZome ${zomeName}/${fnName} timed out`))
-        }
-      }, 30000)
-    })
+    return response
   }
 
   onSignal(callback: (signal: HolochainSignal) => void): () => void {
@@ -195,8 +223,6 @@ export class WebSocketHolochainConductor implements HolochainConductor {
       if (idx >= 0) this.stateCallbacks.splice(idx, 1)
     }
   }
-
-  // Private helpers
 
   private setupMessageHandler(ws: WebSocket): void {
     ws.addEventListener('message', async (event) => {
@@ -218,7 +244,7 @@ export class WebSocketHolochainConductor implements HolochainConductor {
         if (pending) {
           this.pending.delete(msg.id as number)
           if (msg.data) {
-            const responseData = decode(msg.data as Uint8Array) as { type: string; value: unknown }
+            const responseData = decode(msg.data as Uint8Array)
             pending.resolve(responseData)
           } else {
             pending.resolve(null)
@@ -243,18 +269,26 @@ export class WebSocketHolochainConductor implements HolochainConductor {
   }
 
   private async sendAdminRequest(request: Record<string, unknown>): Promise<unknown> {
+    return this.sendRequest(this.adminWs!, request, 'admin')
+  }
+
+  private async sendAppRequest(request: Record<string, unknown>): Promise<unknown> {
+    return this.sendRequest(this.appWs!, request, 'app')
+  }
+
+  private async sendRequest(ws: WebSocket, request: Record<string, unknown>, label: string): Promise<unknown> {
     const id = this.requestId++
     const innerData = encode(request)
     const msg = encode({ type: 'request', id, data: innerData })
 
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
-      this.adminWs!.send(msg)
+      ws.send(msg)
 
       setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id)
-          reject(new Error(`Admin request ${request.type} timed out`))
+          reject(new Error(`${label} request ${request.type} timed out`))
         }
       }, 30000)
     })

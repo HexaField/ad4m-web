@@ -1,5 +1,6 @@
 import type { LinkExpression } from '../linkstore/types'
 import type { Expression } from '../agent/types'
+import type { ZomeCallSigner } from '../holochain/types'
 
 // Language object returned by create()
 export interface Language {
@@ -139,8 +140,8 @@ export interface SignaturesService {
 }
 
 export interface HolochainLanguageDelegate {
-  registerDNAs(dnas: Dna[], holochainSignalCallback?: any): Promise<void>
-  call(dnaNick: string, zomeName: string, fnName: string, params: any): Promise<any>
+  registerDNAs(dnas: Dna[], holochainSignalCallback?: any, signer?: ZomeCallSigner): Promise<void>
+  call(dnaNick: string, zomeName: string, fnName: string, params: any, signer?: ZomeCallSigner): Promise<any>
 }
 
 export interface Dna {

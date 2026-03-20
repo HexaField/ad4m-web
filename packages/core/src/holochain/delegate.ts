@@ -1,5 +1,5 @@
 import type { HolochainLanguageDelegate, Dna } from '../language/types'
-import type { HolochainConductor, CellId, HolochainSignal } from './types'
+import type { HolochainConductor, CellId, HolochainSignal, ZomeCallSigner } from './types'
 
 export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate {
   private conductor: HolochainConductor
@@ -14,7 +14,11 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
     return `${Array.from(cellId.dnaHash).join(',')}_${Array.from(cellId.agentPubKey).join(',')}`
   }
 
-  async registerDNAs(dnas: Dna[], holochainSignalCallback?: (signal: HolochainSignal) => void): Promise<void> {
+  async registerDNAs(
+    dnas: Dna[],
+    holochainSignalCallback?: (signal: HolochainSignal) => void,
+    signer?: ZomeCallSigner
+  ): Promise<void> {
     const agentKey = await this.conductor.generateAgentPubKey()
     for (const dna of dnas) {
       const appInfo = await this.conductor.installApp({
@@ -22,17 +26,18 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
         agentKey,
         happBytes: dna.file
       })
-      // Extract cell IDs from cell_info
-      for (const [roleName, cells] of Object.entries(appInfo.cellInfo)) {
+      for (const cells of Object.values(appInfo.cellInfo)) {
         for (const cell of cells) {
           if ('provisioned' in cell) {
             const cellId: CellId = {
               dnaHash: cell.provisioned.cellId[0],
               agentPubKey: cell.provisioned.cellId[1]
             }
-            // Use roleName or dna.nick as the key
             this.nickToCellId.set(dna.nick, cellId)
             this.registeredCellIds.add(this.cellIdKey(cellId))
+            if (signer) {
+              await this.conductor.grantCapability(cellId, signer)
+            }
           }
         }
       }
@@ -47,11 +52,16 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
     }
   }
 
-  async call(dnaNick: string, zomeName: string, fnName: string, params: unknown): Promise<unknown> {
+  async call(
+    dnaNick: string,
+    zomeName: string,
+    fnName: string,
+    params: unknown,
+    signer?: ZomeCallSigner
+  ): Promise<unknown> {
     const cellId = this.nickToCellId.get(dnaNick)
-    if (!cellId) {
-      throw new Error(`Unknown DNA nick: ${dnaNick}`)
-    }
-    return this.conductor.callZome(cellId, zomeName, fnName, params)
+    if (!cellId) throw new Error(`Unknown DNA nick: ${dnaNick}`)
+    if (!signer) throw new Error('ZomeCallSigner required')
+    return this.conductor.callZome(cellId, zomeName, fnName, params, signer)
   }
 }

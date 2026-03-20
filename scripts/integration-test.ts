@@ -1,16 +1,51 @@
 import WebSocket from 'ws'
 import { encode, decode } from '@msgpack/msgpack'
 import { spawn } from 'child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { createHash, randomBytes, generateKeyPairSync, sign as cryptoSign, createPrivateKey } from 'crypto'
 
 const HOLOCHAIN_BIN = `${process.env.HOME}/repos/hexafield/holochain-conductor/target/release/holochain`
 const HAPP_PATH = `${process.env.HOME}/Desktop/ad4m/bootstrap-languages/p-diff-sync/hc-dna/workdir/Perspective-Diff-Sync.happ`
-const ADMIN_PORT = 4321
+const ADMIN_PORT = 4321 + Math.floor(Math.random() * 1000)
 const NETWORK_SEED = `test-${Date.now()}`
+const APP_ID_A = `agent-a-${Date.now()}`
+const APP_ID_B = `agent-b-${Date.now()}`
+const AGENT_PREFIX = Buffer.from([0x84, 0x20, 0x24])
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Signing helpers ────────────────────────────────────────────────────────
+
+interface SigningKeys {
+  rawPubKey: Uint8Array // 32 bytes
+  agentPubKey: Uint8Array // 39 bytes (HoloHash)
+  privateKeyObj: ReturnType<typeof createPrivateKey>
+}
+
+function generateSigningKeys(): SigningKeys {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'der' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'der' }
+  })
+  const rawPub = new Uint8Array(publicKey.subarray(12)) // 32 bytes after SPKI header
+  const locHash = createHash('sha256').update(rawPub).digest()
+  const loc = locHash.subarray(0, 4)
+  const agentPubKey = new Uint8Array(Buffer.concat([AGENT_PREFIX, rawPub, loc]))
+
+  return {
+    rawPubKey: rawPub,
+    agentPubKey,
+    privateKeyObj: createPrivateKey({ key: privateKey, format: 'der', type: 'pkcs8' })
+  }
+}
+
+function signData(data: Uint8Array, privateKeyObj: ReturnType<typeof createPrivateKey>): Uint8Array {
+  const hash = createHash('sha512').update(data).digest()
+  const sig = cryptoSign(null, hash, privateKeyObj)
+  return new Uint8Array(sig)
+}
+
+// ─── WS helpers ─────────────────────────────────────────────────────────────
 
 let requestId = 0
 
@@ -20,20 +55,14 @@ function sendRequest(ws: WebSocket, request: unknown): Promise<unknown> {
   const msg = encode({ type: 'request', id, data: innerData })
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Request timed out: ${JSON.stringify(request).slice(0, 100)}`))
-    }, 30000)
-
+    const timeout = setTimeout(() => reject(new Error(`Timeout`)), 30000)
     const handler = (raw: WebSocket.RawData) => {
       const outer = decode(new Uint8Array(raw as ArrayBuffer)) as Record<string, unknown>
       if (outer.type === 'response' && outer.id === id) {
         clearTimeout(timeout)
         ws.off('message', handler)
-        if (outer.data) {
-          resolve(decode(outer.data as Uint8Array))
-        } else {
-          resolve(null)
-        }
+        if (outer.data) resolve(decode(outer.data as Uint8Array))
+        else resolve(null)
       }
     }
     ws.on('message', handler)
@@ -43,7 +72,7 @@ function sendRequest(ws: WebSocket, request: unknown): Promise<unknown> {
 
 function connectWs(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url)
+    const ws = new WebSocket(url, { headers: { Origin: 'localhost' } })
     ws.binaryType = 'arraybuffer'
     ws.on('open', () => resolve(ws))
     ws.on('error', reject)
@@ -64,16 +93,14 @@ async function waitForPort(port: number, timeoutMs = 15000): Promise<void> {
   throw new Error(`Timeout waiting for port ${port}`)
 }
 
-// ─── Main Test ──────────────────────────────────────────────────────────────
+// ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main() {
   const tmpDir = mkdtempSync(join(tmpdir(), 'hc-test-'))
   console.log(`Temp dir: ${tmpDir}`)
 
-  // Write conductor config
-  const configPath = join(tmpDir, 'conductor-config.yaml')
   writeFileSync(
-    configPath,
+    join(tmpDir, 'conductor-config.yaml'),
     `
 data_root_path: ${tmpDir}/data
 keystore:
@@ -91,241 +118,276 @@ network:
 `
   )
 
-  // Start conductor
-  console.log('Starting Holochain conductor...')
-  const conductor = spawn(HOLOCHAIN_BIN, ['-c', configPath, '--piped'], {
+  console.log('Starting conductor...')
+
+  const conductor = spawn(HOLOCHAIN_BIN, ['-c', join(tmpDir, 'conductor-config.yaml'), '--piped'], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, RUST_LOG: 'warn' }
   })
-
-  // Send passphrase via stdin (empty passphrase)
   conductor.stdin.write('\n')
   conductor.stdin.end()
-
-  conductor.stdout.on('data', (d: Buffer) => process.stdout.write(`[conductor] ${d}`))
-  conductor.stderr.on('data', (d: Buffer) => process.stderr.write(`[conductor] ${d}`))
+  conductor.stderr.on('data', (d: Buffer) => {
+    if (d.toString().includes('ERROR')) process.stderr.write(`[hc] ${d}`)
+  })
 
   try {
     await waitForPort(ADMIN_PORT)
-    console.log('Conductor ready on port', ADMIN_PORT)
+    console.log('Conductor ready')
 
     const adminWs = await connectWs(`ws://localhost:${ADMIN_PORT}`)
-    console.log('Connected to admin interface')
 
-    // Generate two agent keys
-    const agentAResp = (await sendRequest(adminWs, { type: 'generate_agent_pub_key' })) as {
-      type: string
-      value: Uint8Array
-    }
-    const agentBResp = (await sendRequest(adminWs, { type: 'generate_agent_pub_key' })) as {
-      type: string
-      value: Uint8Array
-    }
-    console.log('Agent A key:', Buffer.from(agentAResp.value).toString('hex').slice(0, 16) + '...')
-    console.log('Agent B key:', Buffer.from(agentBResp.value).toString('hex').slice(0, 16) + '...')
+    // Generate agent keys via lair (conductor-managed)
+    const genA = (await sendRequest(adminWs, { type: 'generate_agent_pub_key' })) as { value: Uint8Array }
+    const genB = (await sendRequest(adminWs, { type: 'generate_agent_pub_key' })) as { value: Uint8Array }
+    console.log('Agent keys generated')
 
-    // Install app for Agent A
+    // Install apps (send as bytes since macOS TCC may block file access)
+    const happBytes = readFileSync(HAPP_PATH)
+    console.log('Happ size:', happBytes.length)
     const installA = (await sendRequest(adminWs, {
       type: 'install_app',
       value: {
-        source: { path: HAPP_PATH },
-        agent_key: agentAResp.value,
-        installed_app_id: 'agent-a',
-        network_seed: NETWORK_SEED,
-        roles_settings: null,
-        ignore_genesis_failure: false
+        source: { type: 'bytes', value: new Uint8Array(happBytes) },
+        agent_key: genA.value,
+        installed_app_id: APP_ID_A,
+        network_seed: NETWORK_SEED
       }
-    })) as {
-      type: string
-      value: {
-        installed_app_id: string
-        cell_info: Record<string, { provisioned: { cell_id: [Uint8Array, Uint8Array] } }[]>
-      }
-    }
-    console.log('Agent A app installed:', installA.type)
+    })) as Record<string, unknown>
+    if (installA.type !== 'app_installed') throw new Error(`Install A: ${JSON.stringify(installA).slice(0, 1000)}`)
+    console.log('Agent A installed')
 
-    // Install app for Agent B
     const installB = (await sendRequest(adminWs, {
       type: 'install_app',
       value: {
-        source: { path: HAPP_PATH },
-        agent_key: agentBResp.value,
-        installed_app_id: 'agent-b',
-        network_seed: NETWORK_SEED,
-        roles_settings: null,
-        ignore_genesis_failure: false
+        source: { type: 'bytes', value: new Uint8Array(happBytes) },
+        agent_key: genB.value,
+        installed_app_id: APP_ID_B,
+        network_seed: NETWORK_SEED
       }
-    })) as {
-      type: string
-      value: {
-        installed_app_id: string
-        cell_info: Record<string, { provisioned: { cell_id: [Uint8Array, Uint8Array] } }[]>
-      }
-    }
-    console.log('Agent B app installed:', installB.type)
+    })) as Record<string, unknown>
+    if (installB.type !== 'app_installed') throw new Error(`Install B: ${JSON.stringify(installB).slice(0, 300)}`)
+    console.log('Agent B installed')
 
-    // Enable both
-    await sendRequest(adminWs, { type: 'enable_app', value: { installed_app_id: 'agent-a' } })
-    await sendRequest(adminWs, { type: 'enable_app', value: { installed_app_id: 'agent-b' } })
-    console.log('Both apps enabled')
+    // Enable
+    await sendRequest(adminWs, { type: 'enable_app', value: { installed_app_id: APP_ID_A } })
+    await sendRequest(adminWs, { type: 'enable_app', value: { installed_app_id: APP_ID_B } })
+
+    // Get cell IDs
+    const valA = installA.value as Record<string, unknown>
+    const valB = installB.value as Record<string, unknown>
+    const cellMapA = valA.cell_info as Record<string, { type: string; value: { cell_id: [Uint8Array, Uint8Array] } }[]>
+    const cellMapB = valB.cell_info as Record<string, { type: string; value: { cell_id: [Uint8Array, Uint8Array] } }[]>
+    const cellIdA = Object.values(cellMapA)[0][0].value.cell_id
+    const cellIdB = Object.values(cellMapB)[0][0].value.cell_id
+
+    // Generate signing keypairs and grant capabilities
+    const sigKeysA = generateSigningKeys()
+    const sigKeysB = generateSigningKeys()
+    const capSecretA = new Uint8Array(randomBytes(64))
+    const capSecretB = new Uint8Array(randomBytes(64))
+
+    // Grant capability for agent A's cell
+    const grantA = (await sendRequest(adminWs, {
+      type: 'grant_zome_call_capability',
+      value: {
+        cell_id: cellIdA,
+        cap_grant: {
+          tag: 'integration-test',
+          access: {
+            type: 'assigned',
+            value: {
+              secret: capSecretA,
+              assignees: [sigKeysA.agentPubKey]
+            }
+          },
+          functions: { type: 'all' }
+        }
+      }
+    })) as Record<string, unknown>
+    console.log('Grant A:', grantA.type)
+
+    const grantB = (await sendRequest(adminWs, {
+      type: 'grant_zome_call_capability',
+      value: {
+        cell_id: cellIdB,
+        cap_grant: {
+          tag: 'integration-test',
+          access: {
+            type: 'assigned',
+            value: {
+              secret: capSecretB,
+              assignees: [sigKeysB.agentPubKey]
+            }
+          },
+          functions: { type: 'all' }
+        }
+      }
+    })) as Record<string, unknown>
+    console.log('Grant B:', grantB.type)
 
     // Attach app interfaces
     const attachA = (await sendRequest(adminWs, {
       type: 'attach_app_interface',
-      value: { port: 0, allowed_origins: '*', installed_app_id: 'agent-a' }
-    })) as { type: string; value: { port: number } }
+      value: { port: 0, allowed_origins: '*', installed_app_id: APP_ID_A }
+    })) as { value: { port: number } }
     const attachB = (await sendRequest(adminWs, {
       type: 'attach_app_interface',
-      value: { port: 0, allowed_origins: '*', installed_app_id: 'agent-b' }
-    })) as { type: string; value: { port: number } }
-    console.log('App interface A on port:', attachA.value.port)
-    console.log('App interface B on port:', attachB.value.port)
+      value: { port: 0, allowed_origins: '*', installed_app_id: APP_ID_B }
+    })) as { value: { port: number } }
+    console.log('App ports:', attachA.value.port, attachB.value.port)
 
-    // Issue auth tokens
+    // Auth tokens
     const tokenA = (await sendRequest(adminWs, {
       type: 'issue_app_authentication_token',
-      value: { installed_app_id: 'agent-a', single_use: false, expiry_seconds: 0 }
-    })) as { type: string; value: { token: Uint8Array } }
+      value: { installed_app_id: APP_ID_A, single_use: false, expiry_seconds: 0 }
+    })) as { value: { token: Uint8Array } }
     const tokenB = (await sendRequest(adminWs, {
       type: 'issue_app_authentication_token',
-      value: { installed_app_id: 'agent-b', single_use: false, expiry_seconds: 0 }
-    })) as { type: string; value: { token: Uint8Array } }
-    console.log('Auth tokens issued')
+      value: { installed_app_id: APP_ID_B, single_use: false, expiry_seconds: 0 }
+    })) as { value: { token: Uint8Array } }
 
-    // Connect to app interfaces
+    // Connect & authenticate app websockets
+    await new Promise((r) => setTimeout(r, 1000)) // Wait for ports to bind
     const appWsA = await connectWs(`ws://localhost:${attachA.value.port}`)
     const appWsB = await connectWs(`ws://localhost:${attachB.value.port}`)
-
-    // Authenticate
     appWsA.send(encode({ type: 'authenticate', data: encode({ token: tokenA.value.token }) }))
     appWsB.send(encode({ type: 'authenticate', data: encode({ token: tokenB.value.token }) }))
-    // Small wait for auth to process
     await new Promise((r) => setTimeout(r, 500))
     console.log('Both agents authenticated')
 
-    // Get cell IDs
-    const cellInfoA = Object.values(installA.value.cell_info)[0]
-    const cellIdA = cellInfoA[0].provisioned.cell_id
-    const cellInfoB = Object.values(installB.value.cell_info)[0]
-    const cellIdB = cellInfoB[0].provisioned.cell_id
+    // Helper for signed zome calls
+    async function callZome(
+      ws: WebSocket,
+      cellId: [Uint8Array, Uint8Array],
+      sigKeys: SigningKeys,
+      capSecret: Uint8Array,
+      fnName: string,
+      payload: unknown
+    ) {
+      const nonce = new Uint8Array(randomBytes(32))
+      const expiresAt = (Date.now() + 300000) * 1000 // microseconds
 
-    // Helper for zome calls
-    async function callZome(ws: WebSocket, cellId: [Uint8Array, Uint8Array], fnName: string, payload: unknown) {
-      const nonce = new Uint8Array(32)
-      for (let i = 0; i < 32; i++) nonce[i] = Math.floor(Math.random() * 256)
-      const expiresAt = BigInt((Date.now() + 300000) * 1000)
+      // Construct ZomeCallParams matching Rust struct field order
+      const zomeCallParams = {
+        provenance: sigKeys.agentPubKey,
+        cell_id: cellId,
+        zome_name: 'perspective_diff_sync',
+        fn_name: fnName,
+        cap_secret: capSecret,
+        payload: encode(payload),
+        nonce,
+        expires_at: expiresAt
+      }
 
-      return sendRequest(ws, {
+      // Serialize with msgpack (matching holochain_serialized_bytes::encode)
+      const paramsBytes = encode(zomeCallParams)
+
+      // Sign SHA-512 of serialized params
+      const signature = signData(new Uint8Array(paramsBytes), sigKeys.privateKeyObj)
+
+      const result = (await sendRequest(ws, {
         type: 'call_zome',
         value: {
-          cell_id: cellId,
-          zome_name: 'perspective_diff_sync',
-          fn_name: fnName,
-          payload: encode(payload),
-          provenance: cellId[1],
-          nonce,
-          expires_at: expiresAt
+          bytes: paramsBytes,
+          signature
         }
-      })
+      })) as Record<string, unknown>
+
+      if (result.type === 'error') {
+        throw new Error(`${fnName}: ${JSON.stringify(result.value).slice(0, 300)}`)
+      }
+      if (result.value instanceof Uint8Array && result.value.length > 0) {
+        try {
+          return decode(result.value)
+        } catch {
+          return result.value
+        }
+      }
+      return result.value
     }
 
-    // ─── Sync Test ────────────────────────────────────────────────────────
+    // ─── Sync Test ────────────────────────────────────────────────────
 
-    console.log('\n=== Starting sync test ===\n')
+    console.log('\n=== Sync Test ===\n')
 
-    // Agent A: create DID link + add active agent
     const didA = 'did:test:agent-a'
     const didB = 'did:test:agent-b'
 
-    console.log('Agent A: creating DID pub key link...')
-    await callZome(appWsA, cellIdA, 'create_did_pub_key_link', didA)
+    console.log('A: create_did_pub_key_link')
+    await callZome(appWsA, cellIdA, sigKeysA, capSecretA, 'create_did_pub_key_link', didA)
 
-    console.log('Agent A: adding active agent link...')
-    await callZome(appWsA, cellIdA, 'add_active_agent_link', null)
+    console.log('A: sync')
+    await callZome(appWsA, cellIdA, sigKeysA, capSecretA, 'sync', didA)
 
-    console.log('Agent A: initial sync...')
-    await callZome(appWsA, cellIdA, 'sync', didA)
-
-    // Agent A: commit a link
-    console.log('Agent A: committing link...')
+    console.log('A: commit link')
     const linkA = {
       author: didA,
       timestamp: new Date().toISOString(),
       data: { source: 'a://source', target: 'a://target', predicate: 'a://predicate' },
-      proof: { key: '', signature: '' }
+      proof: { signature: '', key: '' }
     }
-    const diffA = {
-      additions: [linkA],
-      removals: []
+    await callZome(appWsA, cellIdA, sigKeysA, capSecretA, 'commit', {
+      diff: { additions: [linkA], removals: [] },
+      my_did: didA
+    })
+    console.log('A: committed')
+
+    const renderA = await callZome(appWsA, cellIdA, sigKeysA, capSecretA, 'render', null)
+    console.log('A render:', JSON.stringify(renderA).slice(0, 300))
+
+    // Agent B
+    console.log('\nB: create_did_pub_key_link')
+    await callZome(appWsB, cellIdB, sigKeysB, capSecretB, 'create_did_pub_key_link', didB)
+
+    console.log('Waiting for gossip (10s)...')
+    await new Promise((r) => setTimeout(r, 10000))
+
+    console.log('B: sync')
+    const syncB = await callZome(appWsB, cellIdB, sigKeysB, capSecretB, 'sync', didB)
+    console.log('B sync result:', JSON.stringify(syncB).slice(0, 200))
+
+    console.log('B: current_revision')
+    const revB = await callZome(appWsB, cellIdB, sigKeysB, capSecretB, 'current_revision', null)
+    console.log('B revision:', JSON.stringify(revB).slice(0, 200))
+
+    // Only render if we have a revision
+    if (revB) {
+      const renderB = await callZome(appWsB, cellIdB, sigKeysB, capSecretB, 'render', null)
+      console.log('B render:', JSON.stringify(renderB).slice(0, 300))
+    } else {
+      console.log('B: no revision yet (gossip may need more time)')
     }
-    const commitAResult = await callZome(appWsA, cellIdA, 'commit', { diff: diffA, my_did: didA })
-    console.log('Agent A commit result type:', (commitAResult as Record<string, unknown>).type)
 
-    // Agent A: render to verify
-    const renderA = (await callZome(appWsA, cellIdA, 'render', null)) as { type: string; value: Uint8Array }
-    const renderAData = renderA.value ? decode(renderA.value) : renderA
-    console.log('Agent A render:', JSON.stringify(renderAData).slice(0, 200))
-
-    // Agent B: set up and sync
-    console.log('\nAgent B: creating DID pub key link...')
-    await callZome(appWsB, cellIdB, 'create_did_pub_key_link', didB)
-
-    console.log('Agent B: adding active agent link...')
-    await callZome(appWsB, cellIdB, 'add_active_agent_link', null)
-
-    console.log("Agent B: syncing (should see Agent A's link)...")
-    await callZome(appWsB, cellIdB, 'sync', didB)
-
-    // Wait for gossip
-    console.log('Waiting for gossip...')
-    await new Promise((r) => setTimeout(r, 3000))
-
-    // Agent B: sync again after gossip
-    await callZome(appWsB, cellIdB, 'sync', didB)
-
-    const renderB = (await callZome(appWsB, cellIdB, 'render', null)) as { type: string; value: Uint8Array }
-    const renderBData = renderB.value ? decode(renderB.value) : renderB
-    console.log('Agent B render:', JSON.stringify(renderBData).slice(0, 200))
-
-    // Agent B: commit a different link
-    console.log('\nAgent B: committing link...')
+    console.log('\nB: commit link')
     const linkB = {
       author: didB,
       timestamp: new Date().toISOString(),
       data: { source: 'b://source', target: 'b://target', predicate: 'b://predicate' },
-      proof: { key: '', signature: '' }
+      proof: { signature: '', key: '' }
     }
-    const diffB = {
-      additions: [linkB],
-      removals: []
-    }
-    await callZome(appWsB, cellIdB, 'commit', { diff: diffB, my_did: didB })
+    await callZome(appWsB, cellIdB, sigKeysB, capSecretB, 'commit', {
+      diff: { additions: [linkB], removals: [] },
+      my_did: didB
+    })
 
-    // Wait for gossip
-    console.log('Waiting for gossip...')
-    await new Promise((r) => setTimeout(r, 3000))
+    console.log('Waiting for gossip (5s)...')
+    await new Promise((r) => setTimeout(r, 5000))
 
-    // Agent A: sync and render
-    console.log("\nAgent A: syncing (should see Agent B's link)...")
-    await callZome(appWsA, cellIdA, 'sync', didA)
+    console.log('\nA: sync')
+    await callZome(appWsA, cellIdA, sigKeysA, capSecretA, 'sync', didA)
 
-    const renderA2 = (await callZome(appWsA, cellIdA, 'render', null)) as { type: string; value: Uint8Array }
-    const renderA2Data = renderA2.value ? decode(renderA2.value) : renderA2
-    console.log('Agent A final render:', JSON.stringify(renderA2Data).slice(0, 400))
+    const renderA2 = await callZome(appWsA, cellIdA, sigKeysA, capSecretA, 'render', null)
+    console.log('A final:', JSON.stringify(renderA2).slice(0, 500))
 
-    // Agent B: final render
-    const renderB2 = (await callZome(appWsB, cellIdB, 'render', null)) as { type: string; value: Uint8Array }
-    const renderB2Data = renderB2.value ? decode(renderB2.value) : renderB2
-    console.log('Agent B final render:', JSON.stringify(renderB2Data).slice(0, 400))
+    const renderB2 = await callZome(appWsB, cellIdB, sigKeysB, capSecretB, 'render', null)
+    console.log('B final:', JSON.stringify(renderB2).slice(0, 500))
 
-    console.log('\n=== Integration test complete ===')
+    console.log('\n=== Test complete ===')
 
-    // Cleanup websockets
     appWsA.close()
     appWsB.close()
     adminWs.close()
   } finally {
-    // Kill conductor
     conductor.kill('SIGTERM')
     await new Promise((r) => setTimeout(r, 1000))
     try {

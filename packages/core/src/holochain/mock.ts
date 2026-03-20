@@ -5,7 +5,8 @@ import type {
   HolochainConnectionListener,
   CellId,
   InstalledAppInfo,
-  InstallAppRequest
+  InstallAppRequest,
+  ZomeCallSigner
 } from './types'
 import { HolochainConnectionState } from './types'
 
@@ -56,12 +57,20 @@ export class MockHolochainConductor implements HolochainConductor {
     }
   }
 
-  async callZome(_cellId: CellId, zomeName: string, fnName: string, payload: unknown): Promise<unknown> {
+  async grantCapability(_cellId: CellId, _signer: ZomeCallSigner): Promise<void> {
+    // No-op in mock
+  }
+
+  async callZome(
+    _cellId: CellId,
+    zomeName: string,
+    fnName: string,
+    payload: unknown,
+    _signer: ZomeCallSigner
+  ): Promise<unknown> {
     const key = `${zomeName}/${fnName}`
     const handler = this.handlers.get(key)
-    if (!handler) {
-      throw new Error(`No mock handler for ${key}`)
-    }
+    if (!handler) throw new Error(`No mock handler for ${key}`)
     return handler(payload)
   }
 

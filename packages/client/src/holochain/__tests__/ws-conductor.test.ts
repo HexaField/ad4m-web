@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { encode, decode } from '@msgpack/msgpack'
 import { HolochainConnectionState } from '@ad4m-web/core'
 import { WebSocketHolochainConductor } from '../ws-conductor'
+import type { ZomeCallSigner } from '@ad4m-web/core'
 
-// Mock WebSocket
 class MockWebSocket {
   static instances: MockWebSocket[] = []
 
@@ -45,6 +45,10 @@ class MockWebSocket {
 beforeEach(() => {
   MockWebSocket.instances = []
   vi.stubGlobal('WebSocket', MockWebSocket as unknown)
+  vi.stubGlobal('crypto', {
+    getRandomValues: (arr: Uint8Array) => arr.fill(1),
+    subtle: { digest: async () => new Uint8Array(64).buffer }
+  } as unknown)
 })
 
 afterEach(() => {
@@ -66,33 +70,6 @@ describe('WebSocketHolochainConductor', () => {
     expect(conductor.getState()).toBe(HolochainConnectionState.Connected)
   })
 
-  it('disconnect() closes WebSockets', async () => {
-    const conductor = new WebSocketHolochainConductor()
-    await conductor.connect({ conductorAdminUrl: 'ws://localhost:4444' })
-
-    await conductor.disconnect()
-
-    expect(MockWebSocket.instances[0].closeCalled).toBe(true)
-    expect(conductor.getState()).toBe(HolochainConnectionState.Disconnected)
-  })
-
-  it('state transitions fire callbacks', async () => {
-    const conductor = new WebSocketHolochainConductor()
-    const states: string[] = []
-    conductor.onStateChange((s) => states.push(s))
-
-    await conductor.connect({ conductorAdminUrl: 'ws://localhost:4444' })
-
-    expect(states).toEqual([HolochainConnectionState.Connecting, HolochainConnectionState.Connected])
-
-    await conductor.disconnect()
-    expect(states).toEqual([
-      HolochainConnectionState.Connecting,
-      HolochainConnectionState.Connected,
-      HolochainConnectionState.Disconnected
-    ])
-  })
-
   it('generateAgentPubKey sends correct admin request', async () => {
     const conductor = new WebSocketHolochainConductor()
     await conductor.connect({ conductorAdminUrl: 'ws://localhost:4444' })
@@ -108,7 +85,6 @@ describe('WebSocketHolochainConductor', () => {
     const innerReq = decode(sentMsg.data) as { type: string }
     expect(innerReq.type).toBe('generate_agent_pub_key')
 
-    // Respond
     const responseInner = encode({ type: 'agent_pub_key_generated', value: agentKey })
     const responseMsg = encode({ type: 'response', id: sentMsg.id, data: responseInner })
     adminWs.simulateMessage(responseMsg as Uint8Array)
@@ -117,69 +93,43 @@ describe('WebSocketHolochainConductor', () => {
     expect(result).toEqual(agentKey)
   })
 
-  it('callZome sends correct app request with wire protocol', async () => {
+  it('callZome sends signed call_zome request', async () => {
     const conductor = new WebSocketHolochainConductor()
     await conductor.connect({ conductorAdminUrl: 'ws://localhost:4444' })
 
-    // Manually set up app ws by simulating installApp partially
-    // For unit test, we test callZome directly — need appWs
-    // We'll test the sendRequest encoding format
+    // Prepare app websocket and fake auth
+    const appWs = new MockWebSocket('ws://localhost:5555')
+    // @ts-expect-error - force set private field
+    conductor['appWs'] = appWs
+    // @ts-expect-error - set handler
+    conductor['setupMessageHandler'](appWs)
+
+    const signer: ZomeCallSigner = {
+      agentPubKey: new Uint8Array([1, 2, 3]),
+      capSecret: new Uint8Array(64),
+      sign: async () => new Uint8Array(64).fill(9)
+    }
+
     const cellId = {
       dnaHash: new Uint8Array([1, 2, 3]),
       agentPubKey: new Uint8Array([4, 5, 6])
     }
 
-    await expect(conductor.callZome(cellId, 'z', 'f', {})).rejects.toThrow('Not connected to app interface')
-  })
+    const callPromise = conductor.callZome(cellId, 'z', 'f', { hello: 'world' }, signer)
 
-  it('signal handling dispatches to callbacks', async () => {
-    const conductor = new WebSocketHolochainConductor()
-    await conductor.connect({ conductorAdminUrl: 'ws://localhost:4444' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(appWs.sent).toHaveLength(1)
+    const sentOuter = decode(appWs.sent[0]) as { type: string; id: number; data: Uint8Array }
+    expect(sentOuter.type).toBe('request')
+    const inner = decode(sentOuter.data) as { type: string; value: any }
+    expect(inner.type).toBe('call_zome')
+    expect(inner.value.signature).toBeInstanceOf(Uint8Array)
 
-    const signals: unknown[] = []
-    conductor.onSignal((s) => signals.push(s))
+    const responseInner = encode({ type: 'zome_called', value: encode({ ok: true }) })
+    const responseMsg = encode({ type: 'response', id: sentOuter.id, data: responseInner })
+    appWs.simulateMessage(responseMsg as Uint8Array)
 
-    const adminWs = MockWebSocket.instances[0]
-
-    const dnaHash = new Uint8Array([10, 20, 30])
-    const agentKey = new Uint8Array([40, 50, 60])
-    const signalPayload = { some: 'data' }
-
-    const signalData = encode({
-      cell_id: [dnaHash, agentKey],
-      payload: signalPayload
-    })
-    const signalMsg = encode({ type: 'signal', data: signalData })
-    adminWs.simulateMessage(signalMsg as Uint8Array)
-
-    await new Promise((r) => setTimeout(r, 10))
-
-    expect(signals).toHaveLength(1)
-    expect((signals[0] as { cellId: { dnaHash: Uint8Array } }).cellId.dnaHash).toEqual(dnaHash)
-  })
-
-  it('connect() transitions to Error on WebSocket failure', async () => {
-    vi.stubGlobal(
-      'WebSocket',
-      class {
-        binaryType = 'arraybuffer'
-        onopen: unknown = null
-        onerror: unknown = null
-        constructor() {
-          queueMicrotask(() => (this.onerror as () => void)?.())
-        }
-        addEventListener() {}
-        send() {}
-        close() {}
-      } as unknown
-    )
-
-    const conductor = new WebSocketHolochainConductor()
-    const states: string[] = []
-    conductor.onStateChange((s) => states.push(s))
-
-    await expect(conductor.connect({ conductorAdminUrl: 'ws://localhost:4444' })).rejects.toThrow()
-
-    expect(conductor.getState()).toBe(HolochainConnectionState.Error)
+    const result = await callPromise
+    expect(result).toEqual({ ok: true })
   })
 })

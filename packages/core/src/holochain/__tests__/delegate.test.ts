@@ -2,10 +2,18 @@ import { describe, it, expect } from 'vitest'
 import { MockHolochainConductor } from '../mock'
 import { HolochainLanguageDelegateImpl } from '../delegate'
 import type { Dna } from '../../language/types'
-import type { HolochainSignal } from '../types'
+import type { HolochainSignal, ZomeCallSigner } from '../types'
 
 function makeDna(nick: string): Dna {
   return { file: new Uint8Array([1, 2, 3]), nick, zomeCalls: [['test_zome', 'test_fn']] }
+}
+
+function makeSigner(): ZomeCallSigner {
+  return {
+    agentPubKey: new Uint8Array([1, 2, 3]),
+    capSecret: new Uint8Array(64),
+    sign: async () => new Uint8Array(64)
+  }
 }
 
 describe('HolochainLanguageDelegateImpl', () => {
@@ -15,9 +23,9 @@ describe('HolochainLanguageDelegateImpl', () => {
     conductor.registerHandler('test_zome', 'test_fn', () => 'ok')
 
     const delegate = new HolochainLanguageDelegateImpl(conductor)
-    await delegate.registerDNAs([makeDna('my-dna')])
+    await delegate.registerDNAs([makeDna('my-dna')], undefined, makeSigner())
 
-    const result = await delegate.call('my-dna', 'test_zome', 'test_fn', {})
+    const result = await delegate.call('my-dna', 'test_zome', 'test_fn', {}, makeSigner())
     expect(result).toBe('ok')
   })
 
@@ -35,17 +43,20 @@ describe('HolochainLanguageDelegateImpl', () => {
     })
 
     const delegate = new HolochainLanguageDelegateImpl(conductor)
-    await delegate.registerDNAs([makeDna('dna-a'), makeDna('dna-b')])
+    const signer = makeSigner()
+    await delegate.registerDNAs([makeDna('dna-a'), makeDna('dna-b')], undefined, signer)
 
-    expect(await delegate.call('dna-a', 'zome_a', 'fn_a', {})).toBe('a')
-    expect(await delegate.call('dna-b', 'zome_b', 'fn_b', {})).toBe('b')
+    expect(await delegate.call('dna-a', 'zome_a', 'fn_a', {}, signer)).toBe('a')
+    expect(await delegate.call('dna-b', 'zome_b', 'fn_b', {}, signer)).toBe('b')
   })
 
   it('call throws for unknown nick', async () => {
     const conductor = new MockHolochainConductor()
     const delegate = new HolochainLanguageDelegateImpl(conductor)
 
-    await expect(delegate.call('nonexistent', 'z', 'f', {})).rejects.toThrow('Unknown DNA nick: nonexistent')
+    await expect(delegate.call('nonexistent', 'z', 'f', {}, makeSigner())).rejects.toThrow(
+      'Unknown DNA nick: nonexistent'
+    )
   })
 
   it('signal callback receives signals for registered cells', async () => {
@@ -54,10 +65,9 @@ describe('HolochainLanguageDelegateImpl', () => {
 
     const delegate = new HolochainLanguageDelegateImpl(conductor)
     const signals: HolochainSignal[] = []
-    await delegate.registerDNAs([makeDna('sig-dna')], (s: HolochainSignal) => signals.push(s))
+    await delegate.registerDNAs([makeDna('sig-dna')], (s: HolochainSignal) => signals.push(s), makeSigner())
 
     conductor.registerHandler('test_zome', 'test_fn', () => 'x')
-    // Emit a signal with an unrelated cellId — should NOT be received
     conductor.emitSignal({
       cellId: { dnaHash: new Uint8Array(32), agentPubKey: new Uint8Array(32) },
       payload: 'unrelated'
@@ -72,10 +82,11 @@ describe('HolochainLanguageDelegateImpl', () => {
     conductor.registerHandler('z2', 'f2', () => 'res2')
 
     const delegate = new HolochainLanguageDelegateImpl(conductor)
-    await delegate.registerDNAs([makeDna('first')])
-    await delegate.registerDNAs([makeDna('second')])
+    const signer = makeSigner()
+    await delegate.registerDNAs([makeDna('first')], undefined, signer)
+    await delegate.registerDNAs([makeDna('second')], undefined, signer)
 
-    expect(await delegate.call('first', 'z1', 'f1', {})).toBe('res1')
-    expect(await delegate.call('second', 'z2', 'f2', {})).toBe('res2')
+    expect(await delegate.call('first', 'z1', 'f1', {}, signer)).toBe('res1')
+    expect(await delegate.call('second', 'z2', 'f2', {}, signer)).toBe('res2')
   })
 })

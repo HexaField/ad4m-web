@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { MockHolochainConductor } from '../mock'
 import { HolochainConnectionState } from '../types'
-import type { HolochainSignal } from '../types'
+import type { HolochainSignal, ZomeCallSigner } from '../types'
+
+function makeSigner(): ZomeCallSigner {
+  return {
+    agentPubKey: new Uint8Array([1, 2, 3]),
+    capSecret: new Uint8Array(64),
+    sign: async () => new Uint8Array(64)
+  }
+}
 
 describe('MockHolochainConductor', () => {
   it('connect transitions to Connected', async () => {
@@ -42,14 +50,14 @@ describe('MockHolochainConductor', () => {
     const conductor = new MockHolochainConductor()
     conductor.registerHandler('my_zome', 'my_fn', (p) => ({ echo: p }))
     const cellId = { dnaHash: new Uint8Array(32), agentPubKey: new Uint8Array(32) }
-    const result = await conductor.callZome(cellId, 'my_zome', 'my_fn', 'hello')
+    const result = await conductor.callZome(cellId, 'my_zome', 'my_fn', 'hello', makeSigner())
     expect(result).toEqual({ echo: 'hello' })
   })
 
   it('callZome without handler throws', async () => {
     const conductor = new MockHolochainConductor()
     const cellId = { dnaHash: new Uint8Array(32), agentPubKey: new Uint8Array(32) }
-    await expect(conductor.callZome(cellId, 'z', 'f', {})).rejects.toThrow('No mock handler for z/f')
+    await expect(conductor.callZome(cellId, 'z', 'f', {}, makeSigner())).rejects.toThrow('No mock handler for z/f')
   })
 
   it('emitSignal triggers callbacks', () => {

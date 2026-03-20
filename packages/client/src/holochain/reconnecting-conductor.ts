@@ -5,7 +5,8 @@ import type {
   InstalledAppInfo,
   InstallAppRequest,
   HolochainSignal,
-  HolochainConnectionListener
+  HolochainConnectionListener,
+  ZomeCallSigner
 } from '@ad4m-web/core'
 import { HolochainConnectionState } from '@ad4m-web/core'
 import { WebSocketHolochainConductor } from './ws-conductor'
@@ -15,6 +16,7 @@ interface QueuedCall {
   zomeName: string
   fnName: string
   payload: unknown
+  signer: ZomeCallSigner
   resolve: (v: unknown) => void
   reject: (e: Error) => void
 }
@@ -87,13 +89,23 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
     return this.inner.installApp(request)
   }
 
-  async callZome(cellId: CellId, zomeName: string, fnName: string, payload: unknown): Promise<unknown> {
+  async grantCapability(cellId: CellId, signer: ZomeCallSigner): Promise<void> {
+    return this.inner.grantCapability(cellId, signer)
+  }
+
+  async callZome(
+    cellId: CellId,
+    zomeName: string,
+    fnName: string,
+    payload: unknown,
+    signer: ZomeCallSigner
+  ): Promise<unknown> {
     if (this.inner.getState() === HolochainConnectionState.Connected) {
-      return this.inner.callZome(cellId, zomeName, fnName, payload)
+      return this.inner.callZome(cellId, zomeName, fnName, payload, signer)
     }
 
     return new Promise((resolve, reject) => {
-      this.queue.push({ cellId, zomeName, fnName, payload, resolve, reject })
+      this.queue.push({ cellId, zomeName, fnName, payload, signer, resolve, reject })
     })
   }
 
@@ -116,9 +128,7 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
   private scheduleReconnect(): void {
     if (this.reconnectTimer || !this.config) return
     if (this.retryCount >= this.maxRetries) {
-      for (const q of this.queue) {
-        q.reject(new Error('Max reconnection attempts exceeded'))
-      }
+      for (const q of this.queue) q.reject(new Error('Max reconnection attempts exceeded'))
       this.queue = []
       return
     }
@@ -157,7 +167,7 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
     const queued = this.queue.splice(0)
     for (const q of queued) {
       try {
-        const result = await this.inner.callZome(q.cellId, q.zomeName, q.fnName, q.payload)
+        const result = await this.inner.callZome(q.cellId, q.zomeName, q.fnName, q.payload, q.signer)
         q.resolve(result)
       } catch (e: unknown) {
         q.reject(e instanceof Error ? e : new Error(String(e)))

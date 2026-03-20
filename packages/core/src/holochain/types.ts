@@ -46,13 +46,31 @@ export type HolochainConnectionState = (typeof HolochainConnectionState)[keyof t
 
 export type HolochainConnectionListener = (state: HolochainConnectionState) => void
 
+/**
+ * Platform-agnostic interface for signing zome calls.
+ * Implementations must generate ed25519 keypairs and sign SHA-512 hashes.
+ */
+export interface ZomeCallSigner {
+  /** The 39-byte HoloHash AgentPubKey for this signer (prefix + ed25519 pubkey + DHT location) */
+  readonly agentPubKey: Uint8Array
+  /** The 64-byte capability secret associated with this signer's grant */
+  readonly capSecret: Uint8Array
+  /** Sign the SHA-512 hash of the given data with ed25519 */
+  sign(data: Uint8Array): Promise<Uint8Array>
+}
+
 export interface HolochainConductor {
   connect(config: HolochainConfig): Promise<void>
   disconnect(): Promise<void>
   getState(): HolochainConnectionState
   generateAgentPubKey(): Promise<Uint8Array>
   installApp(request: InstallAppRequest): Promise<InstalledAppInfo>
-  callZome(cellId: CellId, zomeName: string, fnName: string, payload: unknown): Promise<unknown>
+  /**
+   * Grant a capability for the given signer to call zome functions on the given cell.
+   * Must be called before callZome for non-author calls.
+   */
+  grantCapability(cellId: CellId, signer: ZomeCallSigner): Promise<void>
+  callZome(cellId: CellId, zomeName: string, fnName: string, payload: unknown, signer: ZomeCallSigner): Promise<unknown>
   onSignal(callback: (signal: HolochainSignal) => void): () => void
   onStateChange(callback: HolochainConnectionListener): () => void
 }
