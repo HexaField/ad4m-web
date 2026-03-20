@@ -31,6 +31,7 @@ export class SyncEngine {
   private syncState: SyncState = 'idle'
   private onDiff: (diff: PerspectiveDiff) => void
   private onStateChange: (state: SyncState) => void
+  private syncInterval: ReturnType<typeof setInterval> | null = null
 
   constructor(config: SyncEngineConfig) {
     this.adapter = config.adapter
@@ -66,6 +67,16 @@ export class SyncEngine {
     }
     this.currentRevision = await this.adapter.currentRevision()
     this.setState('synced')
+
+    // Periodic sync loop (every 3 seconds) to broadcast our revision and gossip
+    this.syncInterval = setInterval(async () => {
+      if (!this.running) return
+      try {
+        await this.adapter.sync()
+      } catch (e) {
+        console.error('[SyncEngine] periodic sync error:', e)
+      }
+    }, 3000)
   }
 
   async commit(diff: PerspectiveDiff): Promise<string> {
@@ -84,6 +95,10 @@ export class SyncEngine {
 
   stop(): void {
     this.running = false
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval)
+      this.syncInterval = null
+    }
     this.setState('idle')
   }
 

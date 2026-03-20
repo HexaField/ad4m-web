@@ -49,6 +49,7 @@ class PDiffSyncLinkAdapter implements LinkSyncAdapter {
   private diffCallback: PerspectiveDiffObserver | null = null
   private syncStateCallback: SyncStateChangeObserver | null = null
   private didLinkCreated = false
+  private activeAgentLinkCreated = false
   private gossipCount = 0
 
   constructor(hcDelegate: HolochainLanguageDelegate, agentDid: string) {
@@ -82,6 +83,16 @@ class PDiffSyncLinkAdapter implements LinkSyncAdapter {
         this.didLinkCreated = true
       } catch (e) {
         console.error('[p-diff-sync] Failed to create DID link:', e)
+      }
+    }
+
+    // Register as active agent so peers can find us for signal broadcasting
+    if (!this.activeAgentLinkCreated) {
+      try {
+        await this.hcDelegate.call(DNA_ROLE, ZOME_NAME, 'add_active_agent_link', null)
+        this.activeAgentLinkCreated = true
+      } catch (e) {
+        console.error('[p-diff-sync] Failed to add active agent link:', e)
       }
     }
 
@@ -319,6 +330,7 @@ export async function createPDiffSyncLanguage(
           [ZOME_NAME, 'sync'],
           [ZOME_NAME, 'render'],
           [ZOME_NAME, 'commit'],
+          [ZOME_NAME, 'pull'],
           [ZOME_NAME, 'fast_forward_signal'],
           [ZOME_NAME, 'get_others'],
           [ZOME_NAME, 'add_active_agent_link'],
