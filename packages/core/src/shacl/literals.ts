@@ -4,7 +4,12 @@ export function parseLiteral(uri: string): { type: string; value: any } | null {
   const rest = uri.slice('literal://'.length)
 
   if (rest.startsWith('string:')) {
-    return { type: 'string', value: rest.slice('string:'.length) }
+    const raw = rest.slice('string:'.length)
+    try {
+      return { type: 'string', value: decodeURIComponent(raw) }
+    } catch {
+      return { type: 'string', value: raw }
+    }
   }
   if (rest.startsWith('number:')) {
     return { type: 'number', value: parseFloat(rest.slice('number:'.length)) }

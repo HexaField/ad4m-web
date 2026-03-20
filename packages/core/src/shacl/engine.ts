@@ -21,6 +21,25 @@ export class ShaclEngine {
     this.linkStore = linkStore
   }
 
+  /**
+   * Directly register a SubjectClass shape without going through link-based SDNA.
+   * Used by the Ad4mModel system to register shapes programmatically.
+   */
+  registerShape(perspectiveUuid: string, shape: SubjectClass): void {
+    let shapes = this.shapesCache.get(perspectiveUuid)
+    if (!shapes) {
+      shapes = []
+      this.shapesCache.set(perspectiveUuid, shapes)
+    }
+    // Replace existing shape with same name
+    const idx = shapes.findIndex((s) => s.name === shape.name)
+    if (idx >= 0) {
+      shapes[idx] = shape
+    } else {
+      shapes.push(shape)
+    }
+  }
+
   async loadShapes(perspectiveUuid: string): Promise<SubjectClass[]> {
     const allLinks = await this.linkStore.allLinks(perspectiveUuid)
     const shapes = parseShapes(allLinks)
