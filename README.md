@@ -1,88 +1,65 @@
-# Template Monorepo
+# ad4m-web
 
-This is a modern, full-stack TypeScript monorepo template managed with **pnpm workspaces**. It provides a pre-configured environment for building scalable applications with a shared core library, a SolidJS client, and an Express server.
+A complete [AD4M](https://ad4m.dev) executor that runs entirely in the browser. No Electron, no Deno, no native dependencies. Pure TypeScript from the ground up — the only external requirement is a Holochain conductor for peer-to-peer networking.
 
-## 📂 Project Structure
+## Why
 
-The monorepo is organized into the following packages:
+AD4M's reference executor requires Rust, Deno, and Electron. This project makes AD4M accessible from any modern browser tab, with no installation beyond opening a URL.
 
-- **`packages/client`**: A frontend application built with **SolidJS**, **Vite**, and **Tailwind CSS**. It includes **Storybook** for component development and **Playwright** for end-to-end testing.
-- **`packages/server`**: A backend server built with **Express**. It uses **tsx** for fast development execution.
-- **`packages/core`**: A shared library containing common logic, types, or utilities used by both the client and server. It is bundled using **Rollup**.
+## Architecture
 
-## 🚀 Getting Started
+```
+┌─────────────────────────────────────┐
+│           Browser Tab               │
+│  ┌───────────┐  ┌────────────────┐  │
+│  │  @ad4m-web │  │   @ad4m-web    │  │
+│  │   /core    │  │    /client     │  │
+│  │ (pure TS)  │  │ (browser APIs) │  │
+│  └─────┬──────┘  └───────┬────────┘  │
+│        └────────┬────────┘           │
+│            GraphQL Engine            │
+└────────────────┬────────────────────┘
+                 │ WebSocket
+    ┌────────────▼────────────┐
+    │   Holochain Conductor   │
+    │   (external process)    │
+    └─────────────────────────┘
+```
 
-### Prerequisites
+- **Core** — Platform-agnostic: agent crypto, link store, SHACL engine, perspectives, GraphQL, sync engine. Zero browser dependencies.
+- **Client** — Browser bindings: IndexedDB persistence, Web Worker language isolation, Oxigraph WASM triple store, cross-tab leader election, Holochain WebSocket bridge.
 
-- **Node.js** (Latest LTS recommended)
-- **pnpm** (Package manager)
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full deep dive.
 
-### Installation
-
-Install all dependencies across the monorepo:
+## Quick Start
 
 ```bash
 pnpm install
+pnpm build
+pnpm dev          # starts client dev server + API server
 ```
 
-### Development
+Open `https://localhost:3000`. For Holochain p2p, see [docs/holochain-setup.md](./docs/holochain-setup.md).
 
-Start the development servers for both the client and server concurrently:
+## Test
 
 ```bash
-pnpm dev
+pnpm test         # 285 tests (251 core + 34 client)
 ```
 
-- **Client**: http://localhost:5173 (default Vite port)
-- **Server**: Check console output for port (typically configured in `src/index.ts`)
+## Status
 
-## 🛠 Scripts
+- ✅ Agent key management (Ed25519, DID:key)
+- ✅ Perspectives & link CRUD with SPARQL queries
+- ✅ SHACL subject classes
+- ✅ Language runtime with Web Worker sandboxing
+- ✅ GraphQL engine (queries, mutations, subscriptions)
+- ✅ Cross-tab leader election
+- ✅ IndexedDB persistence with auto-save
+- ✅ Holochain conductor bridge (WebSocket, msgpack wire protocol)
+- 🧪 Neighbourhood sync (p-diff-sync protocol)
+- 🧪 Capability-based auth
 
-Run these scripts from the root directory:
+## License
 
-| Script         | Description                                                |
-| :------------- | :--------------------------------------------------------- |
-| `pnpm dev`     | Starts client and server in development mode concurrently. |
-| `pnpm build`   | Builds all packages in the workspace.                      |
-| `pnpm test`    | Runs tests across all packages (Vitest & Playwright).      |
-| `pnpm lint`    | Lints code using Oxlint.                                   |
-| `pnpm format`  | Formats code using Oxfmt.                                  |
-| `pnpm check`   | Runs type checking (`tsc`) and linting.                    |
-| `pnpm prepare` | Sets up Husky git hooks.                                   |
-
-## 🧰 Tech Stack & Tooling
-
-### Core Technologies
-
-- **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **Package Manager**: [pnpm](https://pnpm.io/) (Workspaces)
-- **Build Tools**: [Vite](https://vitejs.dev/) (Client), [Rollup](https://rollupjs.org/) (Core)
-
-### Frontend (`packages/client`)
-
-- **Framework**: [SolidJS](https://www.solidjs.com/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **Testing**: [Playwright](https://playwright.dev/)
-- **Documentation**: [Storybook](https://storybook.js.org/)
-
-### Backend (`packages/server`)
-
-- **Framework**: [Express](https://expressjs.com/)
-- **Runtime**: [tsx](https://github.com/privatenumber/tsx) (TypeScript execution)
-
-### Shared (`packages/core`)
-
-- **Testing**: [Vitest](https://vitest.dev/)
-
-### DevOps & Code Quality
-
-- **Linting**: [Oxlint](https://oxc.rs/docs/guide/usage/linter)
-- **Formatting**: [Oxfmt](https://oxc.rs/docs/guide/usage/formatter)
-- **Git Hooks**: [Husky](https://typicode.github.io/husky/) & [lint-staged](https://github.com/okonet/lint-staged)
-- **CI/CD Readiness**: Scripts are optimized for CI environments (`check`, `test`, `build`).
-
-## ⚙️ Configuration Files
-
-- `pnpm-workspace.yaml`: Defines the workspace structure.
-- `.oxfmtrc.json`: Oxfmt configuration.
-- `tsconfig.json`: Base TypeScript configuration.
+MIT — see [LICENSE](./LICENSE).

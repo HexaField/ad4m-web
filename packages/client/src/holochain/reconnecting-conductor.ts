@@ -2,20 +2,20 @@ import type {
   HolochainConductor,
   HolochainConfig,
   CellId,
-  InstalledCell,
+  InstalledAppInfo,
+  InstallAppRequest,
   HolochainSignal,
   HolochainConnectionListener
 } from '@ad4m-web/core'
 import { HolochainConnectionState } from '@ad4m-web/core'
-import type { Dna } from '@ad4m-web/core'
 import { WebSocketHolochainConductor } from './ws-conductor'
 
 interface QueuedCall {
   cellId: CellId
   zomeName: string
   fnName: string
-  payload: any
-  resolve: (v: any) => void
+  payload: unknown
+  resolve: (v: unknown) => void
   reject: (e: Error) => void
 }
 
@@ -35,7 +35,6 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
     this.baseDelayMs = options?.baseDelayMs ?? 1000
     this.inner = new WebSocketHolochainConductor()
 
-    // Monitor inner state for auto-reconnect
     this.inner.onStateChange((state) => {
       for (const cb of this.stateCallbacks) cb(state)
 
@@ -52,7 +51,6 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
       }
     })
 
-    // Forward signals
     this.inner.onSignal((signal) => {
       for (const cb of this.signalCallbacks) cb(signal)
     })
@@ -70,7 +68,6 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    // Reject queued calls
     for (const q of this.queue) {
       q.reject(new Error('Disconnected'))
     }
@@ -82,16 +79,19 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
     return this.inner.getState()
   }
 
-  async installApp(dnas: Dna[], agentKey?: Uint8Array): Promise<InstalledCell[]> {
-    return this.inner.installApp(dnas, agentKey)
+  async generateAgentPubKey(): Promise<Uint8Array> {
+    return this.inner.generateAgentPubKey()
   }
 
-  async callZome(cellId: CellId, zomeName: string, fnName: string, payload: any): Promise<any> {
+  async installApp(request: InstallAppRequest): Promise<InstalledAppInfo> {
+    return this.inner.installApp(request)
+  }
+
+  async callZome(cellId: CellId, zomeName: string, fnName: string, payload: unknown): Promise<unknown> {
     if (this.inner.getState() === HolochainConnectionState.Connected) {
       return this.inner.callZome(cellId, zomeName, fnName, payload)
     }
 
-    // Queue during reconnection
     return new Promise((resolve, reject) => {
       this.queue.push({ cellId, zomeName, fnName, payload, resolve, reject })
     })
@@ -116,7 +116,6 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
   private scheduleReconnect(): void {
     if (this.reconnectTimer || !this.config) return
     if (this.retryCount >= this.maxRetries) {
-      // Reject all queued calls
       for (const q of this.queue) {
         q.reject(new Error('Max reconnection attempts exceeded'))
       }
@@ -160,8 +159,8 @@ export class ReconnectingHolochainConductor implements HolochainConductor {
       try {
         const result = await this.inner.callZome(q.cellId, q.zomeName, q.fnName, q.payload)
         q.resolve(result)
-      } catch (e: any) {
-        q.reject(e)
+      } catch (e: unknown) {
+        q.reject(e instanceof Error ? e : new Error(String(e)))
       }
     }
   }

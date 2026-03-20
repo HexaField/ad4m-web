@@ -7,28 +7,35 @@ describe('MockHolochainConductor', () => {
   it('connect transitions to Connected', async () => {
     const conductor = new MockHolochainConductor()
     expect(conductor.getState()).toBe(HolochainConnectionState.Disconnected)
-    await conductor.connect({ conductorAdminUrl: '', conductorAppUrl: '' })
+    await conductor.connect({ conductorAdminUrl: '' })
     expect(conductor.getState()).toBe(HolochainConnectionState.Connected)
   })
 
   it('disconnect transitions to Disconnected', async () => {
     const conductor = new MockHolochainConductor()
-    await conductor.connect({ conductorAdminUrl: '', conductorAppUrl: '' })
+    await conductor.connect({ conductorAdminUrl: '' })
     await conductor.disconnect()
     expect(conductor.getState()).toBe(HolochainConnectionState.Disconnected)
   })
 
-  it('installApp returns InstalledCells with correct nicks', async () => {
+  it('generateAgentPubKey returns 32 bytes', async () => {
     const conductor = new MockHolochainConductor()
-    const cells = await conductor.installApp([
-      { file: new Uint8Array([1]), nick: 'dna-one', zomeCalls: [] },
-      { file: new Uint8Array([2]), nick: 'dna-two', zomeCalls: [] }
-    ])
-    expect(cells).toHaveLength(2)
-    expect(cells[0].nick).toBe('dna-one')
-    expect(cells[1].nick).toBe('dna-two')
-    expect(cells[0].cellId.dnaHash).toHaveLength(32)
-    expect(cells[0].cellId.agentPubKey).toHaveLength(32)
+    const key = await conductor.generateAgentPubKey()
+    expect(key).toHaveLength(32)
+  })
+
+  it('installApp returns InstalledAppInfo', async () => {
+    const conductor = new MockHolochainConductor()
+    const info = await conductor.installApp({
+      installedAppId: 'test-app',
+      happBytes: new Uint8Array([1, 2, 3])
+    })
+    expect(info.installedAppId).toBe('test-app')
+    expect(info.agentKey).toHaveLength(32)
+    expect(Object.keys(info.cellInfo)).toHaveLength(1)
+    const cells = info.cellInfo['default']
+    expect(cells).toHaveLength(1)
+    expect(cells[0].provisioned.cellId[0]).toHaveLength(32)
   })
 
   it('callZome with registered handler returns result', async () => {
@@ -64,7 +71,7 @@ describe('MockHolochainConductor', () => {
     const states: string[] = []
     conductor.onStateChange((s) => states.push(s))
 
-    await conductor.connect({ conductorAdminUrl: '', conductorAppUrl: '' })
+    await conductor.connect({ conductorAdminUrl: '' })
     await conductor.disconnect()
     expect(states).toEqual([HolochainConnectionState.Connected, HolochainConnectionState.Disconnected])
   })

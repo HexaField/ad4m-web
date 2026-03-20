@@ -11,7 +11,7 @@ function makeDna(nick: string): Dna {
 describe('HolochainLanguageDelegateImpl', () => {
   it('registerDNAs installs via conductor and stores nick mapping', async () => {
     const conductor = new MockHolochainConductor()
-    await conductor.connect({ conductorAdminUrl: '', conductorAppUrl: '' })
+    await conductor.connect({ conductorAdminUrl: '' })
     conductor.registerHandler('test_zome', 'test_fn', () => 'ok')
 
     const delegate = new HolochainLanguageDelegateImpl(conductor)
@@ -23,7 +23,7 @@ describe('HolochainLanguageDelegateImpl', () => {
 
   it('call routes to correct cell via nick', async () => {
     const conductor = new MockHolochainConductor()
-    await conductor.connect({ conductorAdminUrl: '', conductorAppUrl: '' })
+    await conductor.connect({ conductorAdminUrl: '' })
     const calls: string[] = []
     conductor.registerHandler('zome_a', 'fn_a', () => {
       calls.push('a')
@@ -50,13 +50,12 @@ describe('HolochainLanguageDelegateImpl', () => {
 
   it('signal callback receives signals for registered cells', async () => {
     const conductor = new MockHolochainConductor()
-    await conductor.connect({ conductorAdminUrl: '', conductorAppUrl: '' })
+    await conductor.connect({ conductorAdminUrl: '' })
 
     const delegate = new HolochainLanguageDelegateImpl(conductor)
     const signals: HolochainSignal[] = []
     await delegate.registerDNAs([makeDna('sig-dna')], (s: HolochainSignal) => signals.push(s))
 
-    // We need the cellId that was assigned — get it by calling through
     conductor.registerHandler('test_zome', 'test_fn', () => 'x')
     // Emit a signal with an unrelated cellId — should NOT be received
     conductor.emitSignal({
@@ -68,7 +67,7 @@ describe('HolochainLanguageDelegateImpl', () => {
 
   it('multiple DNAs registered with different nicks', async () => {
     const conductor = new MockHolochainConductor()
-    await conductor.connect({ conductorAdminUrl: '', conductorAppUrl: '' })
+    await conductor.connect({ conductorAdminUrl: '' })
     conductor.registerHandler('z1', 'f1', () => 'res1')
     conductor.registerHandler('z2', 'f2', () => 'res2')
 

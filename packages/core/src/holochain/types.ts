@@ -1,9 +1,5 @@
-import type { Dna } from '../language/types'
-
 export interface HolochainConfig {
   conductorAdminUrl: string
-  conductorAppUrl: string
-  agentPubKey?: string
 }
 
 export interface CellId {
@@ -11,14 +7,33 @@ export interface CellId {
   agentPubKey: Uint8Array
 }
 
-export interface InstalledCell {
-  cellId: CellId
-  nick: string
+export interface ProvisionedCellInfo {
+  provisioned: {
+    cellId: [Uint8Array, Uint8Array]
+    dnaModifiers: Record<string, unknown>
+    name: string
+  }
+}
+
+export type CellInfo = ProvisionedCellInfo
+
+export interface InstalledAppInfo {
+  installedAppId: string
+  agentKey: Uint8Array
+  cellInfo: Record<string, CellInfo[]>
+}
+
+export interface InstallAppRequest {
+  happPath?: string
+  happBytes?: Uint8Array
+  installedAppId: string
+  agentKey?: Uint8Array
+  networkSeed?: string
 }
 
 export interface HolochainSignal {
   cellId: CellId
-  payload: any
+  payload: unknown
 }
 
 export const HolochainConnectionState = {
@@ -35,8 +50,9 @@ export interface HolochainConductor {
   connect(config: HolochainConfig): Promise<void>
   disconnect(): Promise<void>
   getState(): HolochainConnectionState
-  installApp(dnas: Dna[], agentKey?: Uint8Array): Promise<InstalledCell[]>
-  callZome(cellId: CellId, zomeName: string, fnName: string, payload: any): Promise<any>
+  generateAgentPubKey(): Promise<Uint8Array>
+  installApp(request: InstallAppRequest): Promise<InstalledAppInfo>
+  callZome(cellId: CellId, zomeName: string, fnName: string, payload: unknown): Promise<unknown>
   onSignal(callback: (signal: HolochainSignal) => void): () => void
   onStateChange(callback: HolochainConnectionListener): () => void
 }

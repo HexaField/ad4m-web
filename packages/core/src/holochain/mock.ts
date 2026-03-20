@@ -1,11 +1,11 @@
-import type { Dna } from '../language/types'
 import type {
   HolochainConductor,
   HolochainConfig,
   HolochainSignal,
   HolochainConnectionListener,
   CellId,
-  InstalledCell
+  InstalledAppInfo,
+  InstallAppRequest
 } from './types'
 import { HolochainConnectionState } from './types'
 
@@ -13,7 +13,7 @@ export class MockHolochainConductor implements HolochainConductor {
   private state: HolochainConnectionState = HolochainConnectionState.Disconnected
   private signalCallbacks: Set<(signal: HolochainSignal) => void> = new Set()
   private stateCallbacks: Set<HolochainConnectionListener> = new Set()
-  private handlers: Map<string, (payload: any) => any> = new Map()
+  private handlers: Map<string, (payload: unknown) => unknown> = new Map()
 
   private setState(newState: HolochainConnectionState): void {
     this.state = newState
@@ -32,18 +32,31 @@ export class MockHolochainConductor implements HolochainConductor {
     return this.state
   }
 
-  async installApp(dnas: Dna[], agentKey?: Uint8Array): Promise<InstalledCell[]> {
-    const agent = agentKey ?? crypto.getRandomValues(new Uint8Array(32))
-    return dnas.map((dna) => ({
-      cellId: {
-        dnaHash: crypto.getRandomValues(new Uint8Array(32)),
-        agentPubKey: agent
-      },
-      nick: dna.nick
-    }))
+  async generateAgentPubKey(): Promise<Uint8Array> {
+    return crypto.getRandomValues(new Uint8Array(32))
   }
 
-  async callZome(_cellId: CellId, zomeName: string, fnName: string, payload: any): Promise<any> {
+  async installApp(request: InstallAppRequest): Promise<InstalledAppInfo> {
+    const agentKey = request.agentKey ?? crypto.getRandomValues(new Uint8Array(32))
+    const dnaHash = crypto.getRandomValues(new Uint8Array(32))
+    return {
+      installedAppId: request.installedAppId,
+      agentKey,
+      cellInfo: {
+        default: [
+          {
+            provisioned: {
+              cellId: [dnaHash, agentKey],
+              dnaModifiers: {},
+              name: request.installedAppId
+            }
+          }
+        ]
+      }
+    }
+  }
+
+  async callZome(_cellId: CellId, zomeName: string, fnName: string, payload: unknown): Promise<unknown> {
     const key = `${zomeName}/${fnName}`
     const handler = this.handlers.get(key)
     if (!handler) {
@@ -52,7 +65,7 @@ export class MockHolochainConductor implements HolochainConductor {
     return handler(payload)
   }
 
-  registerHandler(zomeName: string, fnName: string, handler: (payload: any) => any): void {
+  registerHandler(zomeName: string, fnName: string, handler: (payload: unknown) => unknown): void {
     this.handlers.set(`${zomeName}/${fnName}`, handler)
   }
 

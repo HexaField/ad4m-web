@@ -15,10 +15,27 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
   }
 
   async registerDNAs(dnas: Dna[], holochainSignalCallback?: (signal: HolochainSignal) => void): Promise<void> {
-    const cells = await this.conductor.installApp(dnas)
-    for (const cell of cells) {
-      this.nickToCellId.set(cell.nick, cell.cellId)
-      this.registeredCellIds.add(this.cellIdKey(cell.cellId))
+    const agentKey = await this.conductor.generateAgentPubKey()
+    for (const dna of dnas) {
+      const appInfo = await this.conductor.installApp({
+        installedAppId: `app-${dna.nick}-${Date.now()}`,
+        agentKey,
+        happBytes: dna.file
+      })
+      // Extract cell IDs from cell_info
+      for (const [roleName, cells] of Object.entries(appInfo.cellInfo)) {
+        for (const cell of cells) {
+          if ('provisioned' in cell) {
+            const cellId: CellId = {
+              dnaHash: cell.provisioned.cellId[0],
+              agentPubKey: cell.provisioned.cellId[1]
+            }
+            // Use roleName or dna.nick as the key
+            this.nickToCellId.set(dna.nick, cellId)
+            this.registeredCellIds.add(this.cellIdKey(cellId))
+          }
+        }
+      }
     }
 
     if (holochainSignalCallback) {
@@ -30,7 +47,7 @@ export class HolochainLanguageDelegateImpl implements HolochainLanguageDelegate 
     }
   }
 
-  async call(dnaNick: string, zomeName: string, fnName: string, params: any): Promise<any> {
+  async call(dnaNick: string, zomeName: string, fnName: string, params: unknown): Promise<unknown> {
     const cellId = this.nickToCellId.get(dnaNick)
     if (!cellId) {
       throw new Error(`Unknown DNA nick: ${dnaNick}`)
