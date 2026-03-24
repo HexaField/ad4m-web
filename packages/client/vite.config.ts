@@ -13,6 +13,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [solid(), tailwindcss()],
+    optimizeDeps: {
+      exclude: ['oxigraph']
+    },
     server: {
       host: env.HOST || 'localhost',
       port: parseInt(env.PORT || '3000'),

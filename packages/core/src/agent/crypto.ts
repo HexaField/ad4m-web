@@ -4,7 +4,8 @@ import type { CryptoProvider } from './types'
 
 export class NobleCryptoProvider implements CryptoProvider {
   async generateKeyPair(): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
-    const privateKey = ed.utils.randomSecretKey()
+    const randomKey = (ed.utils as any).randomPrivateKey ?? (ed.utils as any).randomSecretKey
+    const privateKey = randomKey()
     const publicKey = await ed.getPublicKeyAsync(privateKey)
     return { publicKey, privateKey }
   }

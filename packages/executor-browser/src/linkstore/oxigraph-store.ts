@@ -1,11 +1,21 @@
 import type { LinkExpression, LinkQuery, LinkStore } from '@ad4m-web/core'
 import { validateLink } from '@ad4m-web/core'
-import oxigraph from 'oxigraph'
+import initOxigraph, { Store, namedNode, quad } from 'oxigraph'
+import type { NamedNode } from 'oxigraph'
+
+let oxigraphReady: Promise<void> | null = null
+
+function ensureInit(): Promise<void> {
+  if (!oxigraphReady) {
+    oxigraphReady = initOxigraph().then(() => {})
+  }
+  return oxigraphReady
+}
 
 const DEFAULT_PREDICATE = 'ad4m://default_predicate'
 
-function graphName(perspectiveUuid: string): oxigraph.NamedNode {
-  return oxigraph.namedNode(`urn:ad4m:perspective:${perspectiveUuid}`)
+function graphName(perspectiveUuid: string): NamedNode {
+  return namedNode(`urn:ad4m:perspective:${perspectiveUuid}`)
 }
 
 function linkKey(link: LinkExpression): string {
@@ -30,12 +40,21 @@ interface DumpData {
 }
 
 export class OxigraphLinkStore implements LinkStore {
-  private store: oxigraph.Store
+  private store: Store
   /** perspectiveUuid -> linkKey -> metadata */
   private sidecar = new Map<string, Map<string, SidecarEntry>>()
 
   constructor() {
-    this.store = new oxigraph.Store()
+    // Works synchronously in Node (tests). In browser, use create() to init WASM first.
+    this.store = new Store()
+  }
+
+  /**
+   * Async factory for browser environments — initialises WASM before creating the store.
+   */
+  static async create(): Promise<OxigraphLinkStore> {
+    await ensureInit()
+    return new OxigraphLinkStore()
   }
 
   private getSidecar(perspectiveUuid: string): Map<string, SidecarEntry> {
@@ -54,12 +73,7 @@ export class OxigraphLinkStore implements LinkStore {
     if (sc.has(key)) return // dedup
 
     const graph = graphName(perspectiveUuid)
-    const q = oxigraph.quad(
-      oxigraph.namedNode(link.data.source),
-      oxigraph.namedNode(predicate(link)),
-      oxigraph.namedNode(link.data.target),
-      graph
-    )
+    const q = quad(namedNode(link.data.source), namedNode(predicate(link)), namedNode(link.data.target), graph)
     this.store.add(q)
 
     sc.set(key, {
@@ -83,12 +97,7 @@ export class OxigraphLinkStore implements LinkStore {
     if (!sc?.has(key)) return false
 
     const graph = graphName(perspectiveUuid)
-    const q = oxigraph.quad(
-      oxigraph.namedNode(link.data.source),
-      oxigraph.namedNode(predicate(link)),
-      oxigraph.namedNode(link.data.target),
-      graph
-    )
+    const q = quad(namedNode(link.data.source), namedNode(predicate(link)), namedNode(link.data.target), graph)
     this.store.delete(q)
     sc.delete(key)
     return true
@@ -183,7 +192,7 @@ export class OxigraphLinkStore implements LinkStore {
 
   async load(data: string): Promise<void> {
     const parsed = JSON.parse(data) as DumpData
-    this.store = new oxigraph.Store()
+    this.store = new Store()
     if (parsed.nquads) {
       this.store.load(parsed.nquads, { format: 'application/n-quads' })
     }

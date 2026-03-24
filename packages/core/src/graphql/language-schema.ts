@@ -9,7 +9,8 @@ import {
 import type { LanguageManager } from '../language/manager'
 import type { LanguagePublisher } from '../language/publication'
 import type { LanguageMetaInput } from '../language/registry-types'
-import { readFileSync } from 'fs'
+// fs is only available in Node environments (server package).
+// In browser, this resolver throws — use languagePublishFromSource instead.
 
 const IconType = new GraphQLObjectType({
   name: 'Icon',
@@ -102,9 +103,12 @@ export function createLanguageMutationFields(ctx: LanguageSchemaContext) {
         languagePath: { type: new GraphQLNonNull(GraphQLString) },
         languageMeta: { type: new GraphQLNonNull(LanguageMetaInputType) }
       },
-      resolve: (_: unknown, args: { languagePath: string; languageMeta: LanguageMetaInput }) => {
-        const bundleContent = readFileSync(args.languagePath, 'utf-8')
-        return ctx.publisher.publishLanguage(bundleContent, args.languageMeta, ctx.agentDid ?? 'unknown')
+      resolve: (_: unknown, _args: { languagePath: string; languageMeta: LanguageMetaInput }) => {
+        // In browser environments, reading from file paths is not supported.
+        // The bundle content should be provided via languagePublishFromSource.
+        throw new Error(
+          'languagePublish with file path requires Node.js. Use languagePublishFromSource with bundle content directly.'
+        )
       }
     },
     languageRemove: {
