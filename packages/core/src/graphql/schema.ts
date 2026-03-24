@@ -428,10 +428,22 @@ export function createSchema(executor: Executor, capabilityService?: CapabilityS
         args: { uuid: { type: new GraphQLNonNull(GraphQLString) } },
         resolve: (_: unknown, a: { uuid: string }) => executor.perspectiveManager.snapshot(a.uuid)
       },
+      perspectiveQuerySparql: {
+        type: new GraphQLNonNull(GraphQLString),
+        args: { uuid: { type: new GraphQLNonNull(GraphQLString) }, query: { type: new GraphQLNonNull(GraphQLString) } },
+        resolve: async (_: unknown, a: { uuid: string; query: string }) => {
+          const result = await executor.linkStore.querySparql(a.uuid, a.query)
+          return JSON.stringify(result)
+        }
+      },
       perspectiveQuerySurreal: {
         type: new GraphQLNonNull(GraphQLString),
         args: { uuid: { type: new GraphQLNonNull(GraphQLString) }, query: { type: new GraphQLNonNull(GraphQLString) } },
-        resolve: () => JSON.stringify({ results: [] })
+        resolve: async (_: unknown, a: { uuid: string; query: string }) => {
+          // Backward-compat alias: forwards to SPARQL code path (same as reference impl)
+          const result = await executor.linkStore.querySparql(a.uuid, a.query)
+          return JSON.stringify(result)
+        }
       },
       neighbourhoodOtherAgents: {
         type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))),

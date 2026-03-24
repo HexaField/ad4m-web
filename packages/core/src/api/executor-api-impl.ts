@@ -151,7 +151,8 @@ export class ExecutorAPIImpl implements ExecutorAPI {
   }
 
   async perspectiveQuerySparql(uuid: string, query: string): Promise<string> {
-    return JSON.stringify({ results: [] })
+    const result = await this.executor.linkStore.querySparql(uuid, query)
+    return JSON.stringify(result)
   }
 
   async perspectiveAddLink(uuid: string, link: Link): Promise<LinkExpression> {
