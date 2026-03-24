@@ -4,12 +4,13 @@
 
 ad4m-web runs a complete AD4M executor in pure TypeScript. Where the reference implementation embeds a Rust binary with Deno and Holochain, this project is a clean-room TypeScript implementation that separates platform-agnostic logic from environment-specific bindings.
 
-**392 tests · ~7,500 LOC production · ~5,900 LOC tests**
+**510 tests · ~13,400 LOC production · ~7,200 LOC tests**
 
-The monorepo contains three packages:
+The monorepo contains four packages:
 
-- **`@ad4m-web/core`** — Pure TypeScript. No `window`, `document`, `indexedDB`, `Worker`, or `WebSocket` imports. All platform-specific functionality is injected via interfaces. Can run in Node, Deno, Bun, or browser. Contains: agent crypto, JWT auth, capability system, perspectives, link store, SHACL engine, language runtime (registry, templating, expression adapter, publication), neighbourhood/sync, runtime service (friends, trusted agents, entanglement proofs, hosting stubs), and the full GraphQL schema with subscriptions.
-- **`@ad4m-web/client`** — Browser-specific implementations: IndexedDB, Web Workers, Oxigraph WASM, WebSocket Holochain bridge, cross-tab coordination. Vite + SolidJS single-page application.
+- **`@ad4m-web/core`** — Pure TypeScript. No `window`, `document`, `indexedDB`, `Worker`, or `WebSocket` imports. All platform-specific functionality is injected via interfaces. Can run in Node, Deno, Bun, or browser. Contains: agent crypto, JWT auth, capability system, perspectives, link store, SHACL engine, SPARQL query generation (batch queries, comparison filters), language runtime (registry, templating, expression adapter, publication), neighbourhood/sync, runtime service (friends, trusted agents, entanglement proofs, hosting stubs), and the full GraphQL schema with subscriptions.
+- **`@ad4m-web/executor-browser`** — Browser executor runtime: SharedWorker entry point, Service Worker entry with fallback, IndexedDB persistence, Web Worker language isolation, Oxigraph WASM triple store, and the `bootstrapExecutor()` factory. This package owns everything needed to run the executor off the main thread.
+- **`@ad4m-web/client`** — Browser UI: Vite + SolidJS single-page application. Imports `@ad4m-web/executor-browser` for executor access. Contains Holochain WebSocket bridge, UI components, and demo pages.
 - **`@ad4m-web/server`** — Node.js bindings: HTTP/WebSocket GraphQL transport, file-system persistence.
 
 ---
@@ -284,9 +285,21 @@ The schema covers every operation from the AD4M spec:
 
 ## Browser-Specific Architecture
 
+### Executor Threading Model
+
+**Files:** `executor-browser/src/`
+
+The executor runs off the main thread to keep the UI responsive.
+
+- **SharedWorker entry** (`worker-entry.ts`) — Bootstraps the full executor inside a SharedWorker. Multiple tabs connect via `MessagePort`. Each incoming GraphQL request is executed in-worker and the response posted back. The `bootstrapExecutor()` factory handles Oxigraph WASM initialization, IndexedDB persistence setup, and executor creation.
+- **Service Worker entry** (`sw-entry.ts`) — Intercepts `POST /_ad4m/api` fetch requests and resolves GraphQL in the Service Worker context. Provides offline-capable executor access.
+- **Service Worker client** (`sw-client.ts`) — `ServiceWorkerClient` tries the SW `fetch()` path first, falls back to direct SharedWorker `postMessage` if the SW isn't registered.
+- **Worker client** (`worker-client.ts`) — Tab-side client with ID-correlated request/response over `MessagePort`. Connects to the SharedWorker and forwards GraphQL operations.
+- **Transport-agnostic API** (`protocol.ts`) — Defines the `ExecutorAPI` interface and message protocol shared between SharedWorker, Service Worker, and direct in-process execution modes.
+
 ### IndexedDB Persistence
 
-**Files:** `client/src/persistence/`
+**Files:** `executor-browser/src/persistence/`
 
 All state survives page reloads through IndexedDB.
 
@@ -297,34 +310,11 @@ All state survives page reloads through IndexedDB.
 
 ### Cross-Tab Coordination
 
-**Files:** `client/src/coordination/`
-
-Only one tab runs the executor; others proxy via the leader.
-
-**Election protocol:**
-
-1. Tab generates a stable ID (persisted in `sessionStorage`)
-2. On start, broadcasts `announce` with timestamp via `BroadcastChannel`
-3. After 500ms election timeout, the tab with the lowest timestamp wins
-4. Winner broadcasts `leader-claim`; others acknowledge and become followers
-
-**Leader responsibilities:**
-
-- Runs the full executor and GraphQL engine
-- Sends heartbeats every 2s
-- Handles `graphql-request` messages from followers, executes them, returns `graphql-response`
-
-**Follower behavior:**
-
-- `ProxyGraphQLEngine` forwards all queries to the leader via `BroadcastChannel`
-- Watches for heartbeats; if none received for 6s, triggers re-election
-- On `leader-leaving` message, immediately re-elects
-
-**Failover:** If a leader tab closes (fires `beforeunload`), it broadcasts `leader-leaving`. If it crashes, followers detect via heartbeat timeout and re-elect.
+Cross-tab coordination is handled implicitly by the SharedWorker — all tabs share the same worker instance, so there is no need for leader election. The SharedWorker is the single executor; tabs are thin GraphQL clients.
 
 ### Web Worker Isolation
 
-**Files:** `client/src/language/`
+**Files:** `executor-browser/src/language/`
 
 Language bundles execute in dedicated Web Workers for sandboxed isolation.
 
@@ -343,13 +333,15 @@ Language bundles execute in dedicated Web Workers for sandboxed isolation.
 
 ### Oxigraph WASM
 
-**Files:** `client/src/linkstore/`
+**Files:** `executor-browser/src/linkstore/`
 
 Full RDF triple store running in the browser via Oxigraph compiled to WASM.
 
 - **`OxigraphLinkStore`** — Implements the core `LinkStore` interface with Oxigraph backing:
+  - Async initialization required in browser (`static async create()`) for WASM loading; synchronous constructor available for Node/tests
   - Each perspective gets a named graph: `urn:ad4m:perspective:{uuid}`
   - Links are stored as RDF quads: `(source, predicate, target, graph)`
+  - Source and target values that aren't valid IRIs (e.g. `literal://string:Hello`) are stored as RDF literals via a `toTerm()` helper that tries `namedNode()` first and falls back to `literal()`
   - A sidecar `Map` stores metadata that doesn't fit in RDF: author, timestamp, proof, status
   - Default predicate `ad4m://default_predicate` when none specified
   - Deduplication via composite key: `source|predicate|target|author|timestamp`
@@ -433,7 +425,7 @@ GraphQL query { perspectiveQuerySubjects(uuid, className) }
 
 ## Security Model
 
-- **Agent keys never leave the browser.** Private keys are encrypted with AES-256-GCM (PBKDF2-derived key) and stored in IndexedDB. They exist in memory only while the agent is unlocked.
+- **Agent keys never leave the browser.** Private keys are encrypted with AES-256-GCM (PBKDF2-derived key) and stored in IndexedDB. They exist in memory only while the agent is unlocked, inside the SharedWorker context (not the main thread).
 - **Language bundles are sandboxed in Web Workers.** No access to main thread globals, IndexedDB, or the DOM. Communication only via structured message passing.
 - **Capability-based auth** for GraphQL operations. Each request carries capability claims that are checked against operation requirements.
 - **Holochain provides cryptographic integrity** at the network layer — source chain validation, countersigning, and DHT redundancy.
@@ -448,7 +440,7 @@ GraphQL query { perspectiveQuerySubjects(uuid, className) }
 | Compiler settings | `erasableSyntaxOnly`, `noUnusedLocals`, `noUnusedParameters` |
 | Style             | No enums — const objects + type aliases throughout           |
 | Core constraints  | Zero runtime dependencies on browser or Node APIs            |
-| Testing           | Vitest — 361 core + 30 client + 1 server = 392 tests         |
+| Testing           | Vitest — 510 tests across 58 test files                      |
 | Client build      | Vite + SolidJS + Tailwind CSS                                |
 | Core build        | Rollup with TypeScript plugin                                |
 | Linting           | oxlint + oxfmt                                               |
@@ -458,15 +450,15 @@ GraphQL query { perspectiveQuerySubjects(uuid, className) }
 
 ## Differences from Reference Implementation
 
-|                  | Reference (ad4m-executor)   | ad4m-web                                 |
-| ---------------- | --------------------------- | ---------------------------------------- |
-| Language         | Rust + Deno JS runtime      | Pure TypeScript                          |
-| Holochain        | Embedded conductor          | External conductor via WebSocket         |
-| Platform         | Desktop via Electron (Flux) | Any modern browser                       |
-| Installation     | Binary download / app store | Open a URL                               |
-| GraphQL          | HTTP + WebSocket server     | In-process execution                     |
-| Key storage      | OS keychain / file system   | IndexedDB + Web Crypto                   |
-| Language sandbox | Deno isolate                | Web Worker                               |
-| Code lineage     | —                           | Clean-room implementation, no code reuse |
+|                  | Reference (ad4m-executor)   | ad4m-web                                   |
+| ---------------- | --------------------------- | ------------------------------------------ |
+| Language         | Rust + Deno JS runtime      | Pure TypeScript                            |
+| Holochain        | Embedded conductor          | External conductor via WebSocket           |
+| Platform         | Desktop via Electron (Flux) | Any modern browser                         |
+| Installation     | Binary download / app store | Open a URL                                 |
+| GraphQL          | HTTP + WebSocket server     | In-process (SharedWorker / Service Worker) |
+| Key storage      | OS keychain / file system   | IndexedDB + Web Crypto                     |
+| Language sandbox | Deno isolate                | Web Worker                                 |
+| Code lineage     | —                           | Clean-room implementation, no code reuse   |
 
 Both implement the same AD4M specification and are interoperable at the network level through shared Holochain DNAs and the same GraphQL schema.
