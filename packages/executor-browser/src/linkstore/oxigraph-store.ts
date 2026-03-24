@@ -1,7 +1,20 @@
 import type { LinkExpression, LinkQuery, LinkStore } from '@ad4m-web/core'
 import { validateLink } from '@ad4m-web/core'
-import initOxigraph, { Store, namedNode, quad } from 'oxigraph'
-import type { NamedNode } from 'oxigraph'
+import initOxigraph, { Store, namedNode, quad, literal } from 'oxigraph'
+import type { NamedNode, Term } from 'oxigraph'
+
+/**
+ * Wrap a string as an RDF term. Valid IRIs become NamedNodes; everything else
+ * (e.g. `literal://string:Hello`) is stored as an RDF literal so Oxigraph
+ * doesn't reject characters that are illegal in IRIs.
+ */
+function toTerm(value: string): Term {
+  try {
+    return namedNode(value)
+  } catch {
+    return literal(value)
+  }
+}
 
 let oxigraphReady: Promise<void> | null = null
 
@@ -73,7 +86,7 @@ export class OxigraphLinkStore implements LinkStore {
     if (sc.has(key)) return // dedup
 
     const graph = graphName(perspectiveUuid)
-    const q = quad(namedNode(link.data.source), namedNode(predicate(link)), namedNode(link.data.target), graph)
+    const q = quad(toTerm(link.data.source), namedNode(predicate(link)), toTerm(link.data.target), graph)
     this.store.add(q)
 
     sc.set(key, {
@@ -97,7 +110,7 @@ export class OxigraphLinkStore implements LinkStore {
     if (!sc?.has(key)) return false
 
     const graph = graphName(perspectiveUuid)
-    const q = quad(namedNode(link.data.source), namedNode(predicate(link)), namedNode(link.data.target), graph)
+    const q = quad(toTerm(link.data.source), namedNode(predicate(link)), toTerm(link.data.target), graph)
     this.store.delete(q)
     sc.delete(key)
     return true
