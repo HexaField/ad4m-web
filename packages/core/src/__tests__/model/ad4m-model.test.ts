@@ -309,3 +309,89 @@ describe('ModelQueryBuilder', () => {
     unsub()
   })
 })
+
+describe('Ad4mModel comparison filter integration', () => {
+  let perspective: ModelPerspectiveHandle
+
+  beforeEach(() => {
+    const ctx = createTestPerspective()
+    perspective = ctx.handle
+  })
+
+  it('findAll with NOT filter excludes matches', async () => {
+    await Recipe.create(perspective, { name: 'Pasta' })
+    await Recipe.create(perspective, { name: 'Pizza' })
+
+    const results = await Recipe.findAll(perspective, {
+      where: { name: { not: 'Pizza' } as unknown as string }
+    })
+    expect(results).toHaveLength(1)
+    expect(results[0].name).toBe('Pasta')
+  })
+
+  it('findAll with CONTAINS filter', async () => {
+    await Recipe.create(perspective, { name: 'Pasta Carbonara' })
+    await Recipe.create(perspective, { name: 'Pasta Bolognese' })
+    await Recipe.create(perspective, { name: 'Pizza' })
+
+    const results = await Recipe.findAll(perspective, {
+      where: { name: { contains: 'Pasta' } as unknown as string }
+    })
+    expect(results).toHaveLength(2)
+  })
+
+  it('count with comparison filter', async () => {
+    await Recipe.create(perspective, { name: 'Alpha' })
+    await Recipe.create(perspective, { name: 'Beta' })
+    await Recipe.create(perspective, { name: 'Gamma' })
+
+    const c = await Recipe.count(perspective, {
+      where: { name: { not: 'Beta' } as unknown as string }
+    })
+    expect(c).toBe(2)
+  })
+
+  it('paginate with where filter', async () => {
+    await Recipe.create(perspective, { name: 'A' })
+    await Recipe.create(perspective, { name: 'B' })
+    await Recipe.create(perspective, { name: 'C' })
+    await Recipe.create(perspective, { name: 'D' })
+
+    const page = await Recipe.paginate(perspective, 2, 1, {
+      where: { name: { not: 'D' } as unknown as string }
+    })
+    expect(page.totalCount).toBe(3)
+    expect(page.results).toHaveLength(2)
+  })
+
+  it('findOne with NOT filter', async () => {
+    await Recipe.create(perspective, { name: 'Only' })
+
+    const result = await Recipe.findOne(perspective, {
+      where: { name: { not: 'Nonexistent' } as unknown as string }
+    })
+    expect(result).not.toBeNull()
+    expect(result!.name).toBe('Only')
+  })
+
+  it('findAll returns empty when contains matches nothing', async () => {
+    await Recipe.create(perspective, { name: 'Pasta' })
+
+    const results = await Recipe.findAll(perspective, {
+      where: { name: { contains: 'ZZZZZ' } as unknown as string }
+    })
+    expect(results).toHaveLength(0)
+  })
+
+  it('findAll with limit and where combined', async () => {
+    await Recipe.create(perspective, { name: 'Alpha' })
+    await Recipe.create(perspective, { name: 'Aqua' })
+    await Recipe.create(perspective, { name: 'Beta' })
+
+    const results = await Recipe.findAll(perspective, {
+      where: { name: { contains: 'A' } as unknown as string },
+      limit: 1
+    })
+    expect(results).toHaveLength(1)
+  })
+})

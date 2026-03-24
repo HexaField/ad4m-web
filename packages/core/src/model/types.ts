@@ -6,9 +6,27 @@
 // Query DSL types
 // ---------------------------------------------------------------------------
 
-export type WhereCondition = string | number | boolean | string[] | number[]
+/**
+ * Comparison operators for WHERE conditions.
+ */
+export type ComparisonCondition = {
+  not?: unknown
+  gt?: unknown
+  gte?: unknown
+  lt?: unknown
+  lte?: unknown
+  between?: [unknown, unknown]
+  contains?: string
+}
+
+export type WhereCondition = string | number | boolean | string[] | number[] | ComparisonCondition
 export type Where = { [propertyName: string]: WhereCondition }
 export type OrderBy = { [propertyName: string]: 'ASC' | 'DESC' }
+
+/**
+ * Include map for eager-loading relations.
+ */
+export type IncludeMap = { [relationName: string]: boolean | { include: IncludeMap } }
 
 /**
  * Parent-scoped query. Either raw predicate or model-based resolution.
@@ -22,6 +40,7 @@ export type Query = {
   offset?: number
   limit?: number
   count?: boolean
+  include?: IncludeMap
 }
 
 // ---------------------------------------------------------------------------
