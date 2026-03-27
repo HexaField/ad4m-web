@@ -1,5 +1,7 @@
 export interface HolochainConfig {
   conductorAdminUrl: string
+  /** Linker URL for Holo Web Conductor network configuration */
+  linkerUrl?: string
 }
 
 export interface CellId {

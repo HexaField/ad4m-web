@@ -131,6 +131,9 @@ importers:
 
   packages/executor-browser:
     dependencies:
+      '@ad4m-web/client':
+        specifier: workspace:*
+        version: link:../client
       '@ad4m-web/core':
         specifier: workspace:*
         version: link:../core

@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ad4m-web/client": "workspace:*",
     "@ad4m-web/core": "workspace:*",
     "oxigraph": "^0.5.6"
   },
